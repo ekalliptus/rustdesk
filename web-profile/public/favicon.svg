@@ -1,4 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="EL-Desk">
-  <rect width="32" height="32" rx="6" fill="#0F5C4C"/>
-  <text x="16" y="21" text-anchor="middle" fill="#FFFFFF" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="700" letter-spacing="0.5">EL</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 1000 1000" role="img" aria-label="EL-Desk">
+  <defs>
+    <linearGradient id="bg" x1="500" y1="0" x2="500" y2="1000" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2453CE"/>
+      <stop offset="1" stop-color="#1B42AF"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="670" y1="354" x2="880" y2="154" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#147B6D"/>
+      <stop offset="1" stop-color="#82D4C1"/>
+    </linearGradient>
+  </defs>
+  <rect x="36" y="36" width="928" height="928" rx="216" fill="url(#bg)"/>
+  <rect x="45" y="45" width="910" height="910" rx="208" fill="none" stroke="#5280F2" stroke-opacity="0.45" stroke-width="14"/>
+  <rect x="170" y="230" width="636" height="446" rx="74" fill="#FFFFFF"/>
+  <rect x="236" y="296" width="504" height="314" rx="28" fill="url(#bg)"/>
+  <rect x="448" y="664" width="80" height="74" fill="#FFFFFF"/>
+  <rect x="334" y="726" width="308" height="58" rx="29" fill="#FFFFFF"/>
+  <path fill="#FFFFFF" d="M314 358h156v44H362v30h82v42h-82v30h108v44H314V358zm200 0h48v146h100v44H514V358z"/>
+  <path fill="#214EC7" d="M661.3 362.7C636.1 241.9 739.7 134.1 890.7 143.3 897.9 292.3 816.1 387.9 661.3 362.7z"/>
+  <path fill="url(#leaf)" d="M680 344C666 238 754 164 872 162 868 278 794 358 680 344z"/>
+  <path d="M694 330L824 210" fill="none" stroke="#146076" stroke-width="18" stroke-linecap="round"/>
 </svg>

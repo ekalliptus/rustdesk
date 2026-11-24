@@ -406,9 +406,6 @@ class ScamWarningDialogState extends State<ScamWarningDialog> {
                                       key: "show-scam-warning", value: "N");
                                 }
                               },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
-                        ),
                         child: Text(
                           isButtonLocked
                               ? "${translate("I Agree")} (${_countdown}s)"
@@ -430,7 +427,10 @@ class ScamWarningDialogState extends State<ScamWarningDialog> {
                           Navigator.of(context).pop();
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueAccent,
+                          backgroundColor:
+                              Theme.of(context).colorScheme.background,
+                          foregroundColor:
+                              Theme.of(context).colorScheme.onBackground,
                         ),
                         child: Text(
                           translate("Decline"),

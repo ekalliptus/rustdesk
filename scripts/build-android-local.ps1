@@ -410,11 +410,13 @@ make install
     }
 
     $patchedSigningHere = $false
+    $gradleOriginal = $null
     $keyProps = Join-Path $RepoRoot "flutter\android\key.properties"
     $buildGradle = Join-Path $RepoRoot "flutter\android\app\build.gradle"
     if (-not (Test-Path $keyProps)) {
-        $gradleContent = Get-Content $buildGradle -Raw
+        $gradleContent = [System.IO.File]::ReadAllText($buildGradle, (New-Object System.Text.UTF8Encoding($false)))
         if ($gradleContent -match 'signingConfig signingConfigs\.release') {
+            $gradleOriginal = $gradleContent
             $gradleUpdated = $gradleContent.Replace('signingConfig signingConfigs.release', 'signingConfig signingConfigs.debug')
             [System.IO.File]::WriteAllText($buildGradle, $gradleUpdated, (New-Object System.Text.UTF8Encoding($false)))
             $patchedSigningHere = $true
@@ -456,8 +458,8 @@ make install
         if ($appliedPatchHere -and -not $KeepFlutter344Patch) {
             $restoreFiles += @("flutter/lib/common.dart", "flutter/pubspec.yaml", "flutter/lib/common/widgets/dialog.dart")
         }
-        if ($patchedSigningHere) {
-            $restoreFiles += @("flutter/android/app/build.gradle")
+        if ($patchedSigningHere -and ($null -ne $gradleOriginal)) {
+            [System.IO.File]::WriteAllText($buildGradle, $gradleOriginal, (New-Object System.Text.UTF8Encoding($false)))
         }
         if ($gradlePropsWasClean) {
             $restoreFiles += @("flutter/android/gradle.properties")
@@ -472,8 +474,17 @@ make install
         Write-Error "Missing $apkPath after Flutter Android build."
         exit 1
     }
+    $cargoToml = Get-Content (Join-Path $RepoRoot "Cargo.toml") -Raw
+    $cargoVer = "1.5.3"
+    if ($cargoToml -match '(?m)^version\s*=\s*"([^"]+)"') {
+        $cargoVer = $Matches[1]
+    }
+    $namedApkPath = Join-Path (Split-Path $apkPath -Parent) "EL-Desk-$cargoVer-arm64-v8a.apk"
+    Copy-Item -Force $apkPath $namedApkPath
     $apkInfo = Get-Item $apkPath
+    $namedApkInfo = Get-Item $namedApkPath
     Write-Host "EL-Desk Android APK ready: $($apkInfo.FullName) ($($apkInfo.Length) bytes)"
+    Write-Host "EL-Desk branded APK copy: $($namedApkInfo.FullName) ($($namedApkInfo.Length) bytes)"
 } finally {
     Pop-Location
 }

@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common.dart';
+import '../../common/eldesk_theme.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import '../../consts.dart';
@@ -733,6 +734,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
     final hideSecuritySettings =
         bind.mainGetBuildinOption(key: kOptionHideSecuritySetting) == 'Y';
     final settings = SettingsList(
+      lightTheme: ElDeskTheme.mobileSettingsLightTheme(),
+      darkTheme: ElDeskTheme.mobileSettingsDarkTheme(),
       sections: [
         customClientSection,
         if (!bind.isDisableAccount())
@@ -1274,7 +1277,10 @@ class __DisplayPageState extends State<_DisplayPage> {
         title: Text(translate('Display Settings')),
         centerTitle: true,
       ),
-      body: SettingsList(sections: [
+      body: SettingsList(
+        lightTheme: ElDeskTheme.mobileSettingsLightTheme(),
+        darkTheme: ElDeskTheme.mobileSettingsDarkTheme(),
+        sections: [
         SettingsSection(
           tiles: [
             _getPopupDialogRadioEntry(

@@ -5,6 +5,7 @@ param(
     [string]$UpdateUrl = $env:CUSTOM_UPDATE_URL,
     [string]$AppName = $env:CUSTOM_APP_NAME,
     [switch]$SkipVcpkg,
+    [switch]$SkipRust,
     [switch]$KeepFlutter344Patch
 )
 
@@ -102,18 +103,22 @@ try {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
-    Write-Host "[2/4] Building dylib_virtual_display (Rust 1.75.0 MSVC)..."
-    Push-Location (Join-Path $RepoRoot "libs\virtual_display\dylib")
-    try {
-        cargo +1.75.0-x86_64-pc-windows-msvc build --locked --release
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } finally {
-        Pop-Location
-    }
+    if (-not $SkipRust) {
+        Write-Host "[2/4] Building dylib_virtual_display (Rust 1.75.0 MSVC)..."
+        Push-Location (Join-Path $RepoRoot "libs\virtual_display\dylib")
+        try {
+            cargo +1.75.0-x86_64-pc-windows-msvc build --locked --release
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } finally {
+            Pop-Location
+        }
 
-    Write-Host "[3/4] Building librustdesk.dll (Rust 1.75.0 MSVC, features=flutter,hwcodec,vram)..."
-    cargo +1.75.0-x86_64-pc-windows-msvc build --locked --release --lib --features flutter,hwcodec,vram
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host "[3/4] Building librustdesk.dll (Rust 1.75.0 MSVC, features=flutter,hwcodec,vram)..."
+        cargo +1.75.0-x86_64-pc-windows-msvc build --locked --release --lib --features flutter,hwcodec,vram
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } else {
+        Write-Host "[2/4-3/4] Skipping Rust builds (-SkipRust); reusing existing librustdesk.dll."
+    }
 
     $rustDll = Join-Path $RepoRoot "target\release\librustdesk.dll"
     $vddDll = Join-Path $RepoRoot "target\release\deps\dylib_virtual_display.dll"
@@ -151,6 +156,19 @@ try {
         }
     }
 
+    $pubspecLockWasClean = [string]::IsNullOrWhiteSpace((git status --porcelain flutter/pubspec.lock | Out-String))
+    $flutterBuildCache = Join-Path $RepoRoot "flutter\.dart_tool\flutter_build"
+    if (Test-Path $flutterBuildCache) {
+        Remove-Item -Recurse -Force $flutterBuildCache
+    }
+    $winBuildDir = Join-Path $RepoRoot "flutter\build\windows"
+    $winCmakeCache = Join-Path $winBuildDir "x64\CMakeCache.txt"
+    if ((Test-Path $winCmakeCache) -and ((Get-Content $winCmakeCache -Raw) -match 'TARGET_FILE_DIR:rustdesk')) {
+        Remove-Item -Recurse -Force $winBuildDir
+    }
+    if (Test-Path $winBuildDir) {
+        Get-ChildItem -Path $winBuildDir -Recurse -Filter "Runner.res" -ErrorAction SilentlyContinue | Remove-Item -Force
+    }
     Write-Host "[4/4] Building Flutter Windows release..."
     try {
         Push-Location (Join-Path $RepoRoot "flutter")
@@ -163,8 +181,15 @@ try {
             Pop-Location
         }
     } finally {
+        $winRestore = @()
         if ($appliedPatchHere -and -not $KeepFlutter344Patch) {
-            git checkout -- flutter/lib/common.dart flutter/pubspec.yaml flutter/lib/common/widgets/dialog.dart
+            $winRestore += @("flutter/lib/common.dart", "flutter/pubspec.yaml", "flutter/lib/common/widgets/dialog.dart")
+        }
+        if ($pubspecLockWasClean) {
+            $winRestore += @("flutter/pubspec.lock")
+        }
+        if ($winRestore.Count -gt 0) {
+            git checkout -- @winRestore
         }
     }
 
@@ -173,8 +198,17 @@ try {
     if (Test-Path $vddDll) {
         Copy-Item -Force $vddDll $releaseDir
     }
-    $exePath = Join-Path $releaseDir "rustdesk.exe"
-    Write-Host "EL-Desk Windows build ready: $exePath"
+    $staleRustExe = Join-Path $releaseDir "rustdesk.exe"
+    if (Test-Path $staleRustExe) {
+        Remove-Item -Force $staleRustExe
+    }
+    $exePath = Join-Path $releaseDir "EL-Desk.exe"
+    if (-not (Test-Path $exePath)) {
+        Write-Error "Missing $exePath after Flutter Windows build."
+        exit 1
+    }
+    $exeInfo = Get-Item $exePath
+    Write-Host "EL-Desk Windows build ready: $($exeInfo.FullName) ($($exeInfo.Length) bytes)"
 } finally {
     Pop-Location
 }
