@@ -1,0 +1,73 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Privacy Notice | EL-Desk"
+  description="Data handling, retention, and transport security details for the private EL-Desk remote desktop deployment."
+>
+  <article class="mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+    <header class="border-b border-[var(--border)] pb-6">
+      <h1 class="text-3xl font-bold tracking-tight text-[var(--text)]">
+        EL-Desk privacy notice
+      </h1>
+      <p class="mt-2 text-sm text-[var(--text-muted)]">
+        Scope: private remote desktop service at{" "}
+        <span class="font-mono text-[var(--text)]">desk.ekalliptus.com</span> (1 to 5 personal
+        accounts).
+      </p>
+    </header>
+
+    <div class="mt-8 space-y-8 text-sm leading-relaxed text-[var(--text)]">
+      <section class="space-y-2">
+        <h2 class="text-lg font-semibold text-[var(--text)]">1. Stored account and audit data</h2>
+        <p class="text-[var(--text-muted)]">
+          The custom API on{" "}
+          <span class="font-mono text-[var(--text)]">api.desk.ekalliptus.com</span> stores login
+          credentials (bcrypt password hashes), personal address books, device tags, and session
+          audit timestamps inside the owner's NeonDB PostgreSQL instance.
+        </p>
+      </section>
+
+      <section class="space-y-2">
+        <h2 class="text-lg font-semibold text-[var(--text)]">2. Transient presence heartbeats</h2>
+        <p class="text-[var(--text-muted)]">
+          Device heartbeat checks keep peer online status in Go process memory with a 45-second
+          expiration window. Heartbeat payloads are never written to PostgreSQL. The{" "}
+          <span class="font-mono text-[var(--text)]">hbbs</span> rendezvous process maintains peer
+          routing identifiers locally in SQLite on the VPS.
+        </p>
+      </section>
+
+      <section class="space-y-2">
+        <h2 class="text-lg font-semibold text-[var(--text)]">
+          3. Encryption and third-party servers
+        </h2>
+        <p class="text-[var(--text-muted)]">
+          Client builds pin{" "}
+          <span class="font-mono text-[var(--text)]">relay.desk.ekalliptus.com</span> and require
+          public key verification (<span class="font-mono text-[var(--text)]">-k _</span>) before
+          establishing remote sessions. Builds do not transmit telemetry or update checks to public
+          RustDesk infrastructure.
+        </p>
+      </section>
+
+      <section class="space-y-2">
+        <h2 class="text-lg font-semibold text-[var(--text)]">4. Web portal requests</h2>
+        <p class="text-[var(--text-muted)]">
+          This web portal sets no analytics trackers or advertising cookies. Local storage is used
+          strictly to remember your chosen light or dark theme preference in the browser.
+        </p>
+      </section>
+    </div>
+
+    <div class="mt-10 border-t border-[var(--border)] pt-6">
+      <a
+        href="/#downloads"
+        class="inline-flex min-h-11 items-center rounded-[6px] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+      >
+        Return to client downloads
+      </a>
+    </div>
+  </article>
+</BaseLayout>

@@ -15,13 +15,21 @@ use hbb_common::{
     ResultType,
 };
 use lazy_static::lazy_static;
-use std::{collections::HashMap, sync::RwLock, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        RwLock,
+    },
+    time::Instant,
+};
 
 lazy_static! {
     static ref TX_WHITEBOARD: RwLock<Option<UnboundedSender<(String, CustomEvent)>>> =
         RwLock::new(None);
     static ref CONNS: RwLock<HashMap<String, Conn>> = Default::default();
 }
+static WHITEBOARD_STARTING: AtomicBool = AtomicBool::new(false);
 
 struct Conn {
     last_cursor_pos: (f32, f32), // For click ripple
@@ -135,11 +143,18 @@ fn tx_send_event(conn: &mut Conn, k: String, event: CustomEvent) {
 
 #[tokio::main(flavor = "current_thread")]
 async fn start_whiteboard_() -> ResultType<()> {
-    let mut tx_whiteboard = TX_WHITEBOARD.write().unwrap();
-    if tx_whiteboard.is_some() {
+    if TX_WHITEBOARD.read().unwrap().is_some()
+        || WHITEBOARD_STARTING.swap(true, Ordering::AcqRel)
+    {
         log::warn!("Whiteboard already started");
         return Ok(());
     }
+    let _starting_guard = crate::common::SimpleCallOnReturn {
+        b: true,
+        f: Box::new(|| {
+            WHITEBOARD_STARTING.store(false, Ordering::Release);
+        }),
+    };
 
     loop {
         if !crate::platform::is_prelogin() {
@@ -207,8 +222,7 @@ async fn start_whiteboard_() -> ResultType<()> {
 
     let mut stream = stream.ok_or(anyhow!("none stream"))?;
     let (tx, mut rx) = unbounded_channel();
-    tx_whiteboard.replace(tx);
-    drop(tx_whiteboard);
+    TX_WHITEBOARD.write().unwrap().replace(tx);
     let _call_on_ret = crate::common::SimpleCallOnReturn {
         b: true,
         f: Box::new(move || {
@@ -237,14 +251,21 @@ async fn start_whiteboard_() -> ResultType<()> {
                 }
             },
             _ = timer.tick() => {
-                let mut conns = CONNS.write().unwrap();
-                for (k, conn) in conns.iter_mut() {
-                    if conn.last_cursor_evt.tm.elapsed().as_millis() > 300 {
-                        if let Some(evt) = conn.last_cursor_evt.evt.take() {
-                            allow_err!(stream.send(&Data::Whiteboard((k.clone(), evt))).await);
-                            conn.last_cursor_evt.c = 0;
+                let pending: Vec<(String, CustomEvent)> = {
+                    let mut conns = CONNS.write().unwrap();
+                    let mut due = Vec::new();
+                    for (k, conn) in conns.iter_mut() {
+                        if conn.last_cursor_evt.tm.elapsed().as_millis() > 300 {
+                            if let Some(evt) = conn.last_cursor_evt.evt.take() {
+                                due.push((k.clone(), evt));
+                                conn.last_cursor_evt.c = 0;
+                            }
                         }
                     }
+                    due
+                };
+                for data in pending {
+                    allow_err!(stream.send(&Data::Whiteboard(data)).await);
                 }
             }
         }

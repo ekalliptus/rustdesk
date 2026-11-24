@@ -52,12 +52,6 @@ impl Session {
         secured: bool,
         key: Option<&[u8]>,
     ) -> ResultType<Self> {
-        if crate::common::is_direct_ip_access(login.get_id()) {
-            return Ok(Self {
-                credentials: Some(Credentials::direct_ip(login.get_id())),
-                ..Default::default()
-            });
-        }
         let Some(key) = key.filter(|_| secured) else {
             return Ok(Self::default());
         };
@@ -159,6 +153,7 @@ pub(super) struct Credentials {
 }
 
 impl Credentials {
+    #[allow(dead_code)]
     fn direct_ip(peer_id: &str) -> Self {
         Self {
             peer_id: peer_id.to_owned(),

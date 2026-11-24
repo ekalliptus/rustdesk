@@ -426,6 +426,9 @@ impl<'a> Iterator for EncodeFrames<'a> {
                     return None;
                 } else if (*pkt).kind == aom_codec_cx_pkt_kind::AOM_CODEC_CX_FRAME_PKT {
                     let f = &(*pkt).data.frame;
+                    if f.buf.is_null() || f.sz == 0 {
+                        continue;
+                    }
                     return Some(Self::Item {
                         data: slice::from_raw_parts(f.buf as _, f.sz as _),
                         key: (f.flags & AOM_FRAME_IS_KEY) != 0,

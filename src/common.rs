@@ -8,7 +8,7 @@ use std::{
 
 use serde_json::{json, Map, Value};
 
-use base::{config::keys, message_proto::*};
+use base::{config::keys, message_proto::*, private_config};
 #[cfg(not(target_os = "ios"))]
 use hbb_common::whoami;
 use hbb_common::{
@@ -26,7 +26,7 @@ use hbb_common::{
     socket_client,
     sodiumoxide::crypto::{box_, secretbox, sign},
     timeout,
-    tls::{get_cached_tls_accept_invalid_cert, get_cached_tls_type, upsert_tls_cache, TlsType},
+    tls::{get_cached_tls_type, upsert_tls_cache, TlsType},
     tokio::{
         self,
         net::UdpSocket,
@@ -93,6 +93,7 @@ pub mod input {
 
 lazy_static::lazy_static! {
     pub static ref SOFTWARE_UPDATE_URL: Arc<Mutex<String>> = Default::default();
+    pub static ref SOFTWARE_UPDATE_VERSION: Arc<Mutex<String>> = Default::default();
     pub static ref DEVICE_ID: Arc<Mutex<String>> = Default::default();
     pub static ref DEVICE_NAME: Arc<Mutex<String>> = Default::default();
     static ref PUBLIC_IPV6_ADDR: Arc<Mutex<(Option<SocketAddr>, Option<Instant>)>> = Default::default();
@@ -130,6 +131,7 @@ pub fn init_sodium() {
 
 pub fn global_init() -> bool {
     init_sodium();
+    private_config::apply_private_defaults();
     #[cfg(all(target_os = "linux", feature = "drm"))]
     crate::platform::linux::dispatch_wayland_display_probe();
     #[cfg(target_os = "linux")]
@@ -1067,7 +1069,7 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 }
 
 pub fn check_software_update() {
-    if is_custom_client() {
+    if private_config::update_url().is_empty() {
         return;
     }
     let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
@@ -1155,53 +1157,55 @@ pub(crate) fn display_version_from_release_id(release_id: &str) -> ResultType<St
 }
 
 fn clear_software_update_url() {
-    let mut update_url = SOFTWARE_UPDATE_URL.lock().unwrap();
-    *update_url = String::new();
+    *SOFTWARE_UPDATE_URL.lock().unwrap() = String::new();
+    *SOFTWARE_UPDATE_VERSION.lock().unwrap() = String::new();
 }
 
 fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
-    let resp: hbb_common::VersionCheckResponse = serde_json::from_slice(&bytes)?;
-    let response_url = resp.url;
-    let release_id = release_id_from_update_url(&response_url)?;
-    let latest_release_version = display_version_from_release_id(&release_id)?;
+    let parsed = private_config::parse_private_update_manifest(
+        &bytes,
+        private_config::update_url(),
+        private_config::web_url(),
+    )?;
 
-    if get_version_number(&latest_release_version) > get_version_number(crate::VERSION) {
+    if get_version_number(&parsed.version) > get_version_number(crate::VERSION) {
         #[cfg(feature = "flutter")]
         {
             let mut m = HashMap::new();
             m.insert("name", "check_software_update_finish");
-            m.insert("url", &response_url);
+            m.insert("url", &parsed.url);
             if let Ok(data) = serde_json::to_string(&m) {
                 let _ = crate::flutter::push_global_event(crate::flutter::APP_TYPE_MAIN, data);
             }
         }
-        *SOFTWARE_UPDATE_URL.lock().unwrap() = response_url;
+        *SOFTWARE_UPDATE_VERSION.lock().unwrap() = parsed.version;
+        *SOFTWARE_UPDATE_URL.lock().unwrap() = parsed.url;
     } else {
         clear_software_update_url();
     }
     Ok(())
 }
 
-// No need to check `danger_accept_invalid_cert` for now.
-// Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
-    let (request, url) =
-        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
+    let url = private_config::update_url();
+    if url.is_empty() {
+        clear_software_update_url();
+        return Ok(());
+    }
     let proxy_conf = Config::get_socks();
-    let tls_url = get_url_for_tls(&url, &proxy_conf);
+    let tls_url = get_url_for_tls(url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
     let is_tls_not_cached = tls_type.is_none();
     let tls_type = tls_type.unwrap_or(TlsType::Rustls);
     let client = create_http_client_async(tls_type, false);
-    let latest_release_response: ResultType<_> = match client.post(&url).json(&request).send().await
-    {
+    let latest_release_response: ResultType<_> = match client.get(url).send().await {
         Ok(resp) => Ok((tls_type, resp)),
         Err(err) => {
             if is_tls_not_cached && err.is_request() {
                 let tls_type = TlsType::NativeTls;
                 let client = create_http_client_async(tls_type, false);
-                match client.post(&url).json(&request).send().await {
+                match client.get(url).send().await {
                     Ok(resp) => Ok((tls_type, resp)),
                     Err(err) => Err(err.into()),
                 }
@@ -1312,12 +1316,12 @@ fn get_api_server_(api: String, custom: String) -> String {
             } else {
                 s
             };
-            return format!("http://{}:{}", s, config::RENDEZVOUS_PORT - 2);
+            return format!("https://{}:{}", s, config::RENDEZVOUS_PORT - 2);
         } else {
-            return format!("http://{}", s);
+            return format!("https://{}", s);
         }
     }
-    "https://admin.rustdesk.com".to_owned()
+    private_config::api_server().to_owned()
 }
 
 #[inline]
@@ -1614,7 +1618,7 @@ async fn post_request_http(url: &str, body: &str, header: &str) -> ResultType<(u
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
-    let danger_accept_invalid_cert = get_cached_tls_accept_invalid_cert(tls_url);
+    let danger_accept_invalid_cert = Some(false);
     let response = post_request_(
         url,
         tls_url,
@@ -1766,14 +1770,10 @@ async fn post_request_(
     body: String,
     header: &str,
     tls_type: Option<TlsType>,
-    danger_accept_invalid_cert: Option<bool>,
-    original_danger_accept_invalid_cert: Option<bool>,
+    _danger_accept_invalid_cert: Option<bool>,
+    _original_danger_accept_invalid_cert: Option<bool>,
 ) -> ResultType<reqwest::Response> {
-    let mut req = create_http_client_async(
-        tls_type.unwrap_or(TlsType::Rustls),
-        danger_accept_invalid_cert.unwrap_or(false),
-    )
-    .post(url);
+    let mut req = create_http_client_async(tls_type.unwrap_or(TlsType::Rustls), false).post(url);
     if !header.is_empty() {
         let tmp: Vec<&str> = header.split(": ").collect();
         if tmp.len() == 2 {
@@ -1787,11 +1787,7 @@ async fn post_request_(
         // `danger_accept_invalid_cert` are cached.
         match req.body(body.clone()).timeout(to).send().await {
             Ok(resp) => {
-                upsert_tls_cache(
-                    tls_url,
-                    tls_type.unwrap_or(TlsType::Rustls),
-                    danger_accept_invalid_cert.unwrap_or(false),
-                );
+                upsert_tls_cache(tls_url, tls_type.unwrap_or(TlsType::Rustls), false);
                 Ok(resp)
             }
             Err(e) => Err(anyhow!("{:?}", e)),
@@ -1799,52 +1795,28 @@ async fn post_request_(
     } else {
         match req.body(body.clone()).timeout(to).send().await {
             Ok(resp) => {
-                upsert_tls_cache(
-                    tls_url,
-                    tls_type.unwrap_or(TlsType::Rustls),
-                    danger_accept_invalid_cert.unwrap_or(false),
-                );
+                upsert_tls_cache(tls_url, tls_type.unwrap_or(TlsType::Rustls), false);
                 Ok(resp)
             }
             Err(e) => {
-                if (tls_type.is_none() || danger_accept_invalid_cert.is_none()) && e.is_request() {
-                    if danger_accept_invalid_cert.is_none() {
-                        api_log!(
-                            warn,
-                            url,
-                            API_LOG_INTERVAL,
-                            "HTTP request failed: {:?}, try again, danger accept invalid cert",
-                            e
-                        );
-                        post_request_(
-                            url,
-                            tls_url,
-                            body,
-                            header,
-                            tls_type,
-                            Some(true),
-                            original_danger_accept_invalid_cert,
-                        )
-                        .await
-                    } else {
-                        api_log!(
-                            warn,
-                            url,
-                            API_LOG_INTERVAL,
-                            "HTTP request failed: {:?}, try again with native-tls",
-                            e
-                        );
-                        post_request_(
-                            url,
-                            tls_url,
-                            body,
-                            header,
-                            Some(TlsType::NativeTls),
-                            original_danger_accept_invalid_cert,
-                            original_danger_accept_invalid_cert,
-                        )
-                        .await
-                    }
+                if tls_type.is_none() && e.is_request() {
+                    api_log!(
+                        warn,
+                        url,
+                        API_LOG_INTERVAL,
+                        "HTTP request failed: {:?}, try again with native-tls",
+                        e
+                    );
+                    post_request_(
+                        url,
+                        tls_url,
+                        body,
+                        header,
+                        Some(TlsType::NativeTls),
+                        Some(false),
+                        Some(false),
+                    )
+                    .await
                 } else {
                     Err(anyhow!("{:?}", e))
                 }
@@ -1866,13 +1838,10 @@ async fn get_http_response_async(
     body: Option<String>,
     header: &str,
     tls_type: Option<TlsType>,
-    danger_accept_invalid_cert: Option<bool>,
-    original_danger_accept_invalid_cert: Option<bool>,
+    _danger_accept_invalid_cert: Option<bool>,
+    _original_danger_accept_invalid_cert: Option<bool>,
 ) -> ResultType<reqwest::Response> {
-    let http_client = create_http_client_async(
-        tls_type.unwrap_or(TlsType::Rustls),
-        danger_accept_invalid_cert.unwrap_or(false),
-    );
+    let http_client = create_http_client_async(tls_type.unwrap_or(TlsType::Rustls), false);
     let normalized_method = method.to_ascii_lowercase();
     let mut http_client = match normalized_method.as_str() {
         "get" => http_client.get(url),
@@ -1895,11 +1864,7 @@ async fn get_http_response_async(
             .await
         {
             Ok(resp) => {
-                upsert_tls_cache(
-                    tls_url,
-                    tls_type.unwrap_or(TlsType::Rustls),
-                    danger_accept_invalid_cert.unwrap_or(false),
-                );
+                upsert_tls_cache(tls_url, tls_type.unwrap_or(TlsType::Rustls), false);
                 Ok(resp)
             }
             Err(e) => Err(anyhow!("{:?}", e)),
@@ -1915,45 +1880,23 @@ async fn get_http_response_async(
             .await
         {
             Ok(resp) => {
-                upsert_tls_cache(
-                    tls_url,
-                    tls_type.unwrap_or(TlsType::Rustls),
-                    danger_accept_invalid_cert.unwrap_or(false),
-                );
+                upsert_tls_cache(tls_url, tls_type.unwrap_or(TlsType::Rustls), false);
                 Ok(resp)
             }
             Err(e) => {
-                if (tls_type.is_none() || danger_accept_invalid_cert.is_none()) && e.is_request() {
-                    if danger_accept_invalid_cert.is_none() {
-                        log::warn!(
-                            "HTTP request failed: {:?}, try again, danger accept invalid cert",
-                            e
-                        );
-                        get_http_response_async(
-                            url,
-                            tls_url,
-                            method,
-                            body,
-                            header,
-                            tls_type,
-                            Some(true),
-                            original_danger_accept_invalid_cert,
-                        )
-                        .await
-                    } else {
-                        log::warn!("HTTP request failed: {:?}, try again with native-tls", e);
-                        get_http_response_async(
-                            url,
-                            tls_url,
-                            method,
-                            body,
-                            header,
-                            Some(TlsType::NativeTls),
-                            original_danger_accept_invalid_cert,
-                            original_danger_accept_invalid_cert,
-                        )
-                        .await
-                    }
+                if tls_type.is_none() && e.is_request() {
+                    log::warn!("HTTP request failed: {:?}, try again with native-tls", e);
+                    get_http_response_async(
+                        url,
+                        tls_url,
+                        method,
+                        body,
+                        header,
+                        Some(TlsType::NativeTls),
+                        Some(false),
+                        Some(false),
+                    )
+                    .await
                 } else {
                     Err(anyhow!("{:?}", e))
                 }
@@ -1973,7 +1916,7 @@ async fn http_request_http(
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
-    let danger_accept_invalid_cert = get_cached_tls_accept_invalid_cert(tls_url);
+    let danger_accept_invalid_cert = Some(false);
     let response = get_http_response_async(
         url,
         tls_url,
@@ -2181,7 +2124,7 @@ pub async fn get_key(sync: bool) -> String {
         options.remove("key").unwrap_or_default()
     };
     if key.is_empty() {
-        key = config::RS_PUB_KEY.to_owned();
+        key = private_config::rs_pub_key().to_owned();
     }
     key
 }
@@ -2306,7 +2249,11 @@ async fn secure_tcp_impl(conn: &mut Stream, key: &str, log_on_success: bool) -> 
     if use_ws() {
         return Ok(());
     }
-    key_exchange(conn, key, log_on_success).await.map(|_| ())
+    if key_exchange(conn, key, log_on_success).await? {
+        Ok(())
+    } else {
+        bail!("the rendezvous server did not complete the key exchange");
+    }
 }
 
 /// The server's key exchange on `conn`. `Ok(true)` once the stream is encrypted. `Ok(false)`
@@ -2516,6 +2463,7 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    private_config::apply_private_defaults();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
@@ -3287,7 +3235,7 @@ mod tests {
     fn test_api_server_from_bare_ipv6_rendezvous_server() {
         assert_eq!(
             get_api_server_("".to_owned(), "2001:db8::1".to_owned()),
-            "http://[2001:db8::1]:21114"
+            "https://[2001:db8::1]:21114"
         );
     }
 
@@ -3434,10 +3382,10 @@ mod tests {
         let mut conn = connect(&host).await;
         assert!(secure_tcp_required(&mut conn, &key).await.is_err());
         assert!(!conn.is_secured());
-        // The legacy call tolerates the same server, and the stream stays in the clear.
+        // Fail-closed: `secure_tcp` must also refuse a server without key exchange.
         let host = rendezvous_stub(serve).await;
         let mut conn = connect(&host).await;
-        secure_tcp(&mut conn, &key).await.unwrap();
+        assert!(secure_tcp(&mut conn, &key).await.is_err());
         assert!(!conn.is_secured());
     }
 

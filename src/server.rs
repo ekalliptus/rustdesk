@@ -263,7 +263,10 @@ pub async fn create_tcp_connection(
 /// Separate so it can be raced against the connection's eviction.
 async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()> {
     let (sk, pk) = Config::get_key_pair();
-    if secure && pk.len() == sign::PUBLICKEYBYTES && sk.len() == sign::SECRETKEYBYTES {
+    if secure {
+        if pk.len() != sign::PUBLICKEYBYTES || sk.len() != sign::SECRETKEYBYTES {
+            bail!("Handshake failed: server identity keypair unavailable");
+        }
         let mut sk_ = [0u8; sign::SECRETKEYBYTES];
         sk_[..].copy_from_slice(&sk);
         let sk = sign::SecretKey(sk_);
@@ -332,13 +335,12 @@ async fn identity_handshake(stream: &mut Stream, secure: bool) -> ResultType<()>
                                 },
                             )?;
                         } else if pk.asymmetric_value.is_empty() {
-                            Config::set_key_confirmed(false);
-                            log::info!("Force to update pk");
+                            bail!("Handshake failed: unencrypted fallback rejected");
                         } else {
                             bail!("Handshake failed: invalid public sign key length from peer");
                         }
                     } else {
-                        log::error!("Handshake failed: invalid message type");
+                        bail!("Handshake failed: invalid message type");
                     }
                 } else {
                     bail!("Handshake failed: invalid message format");

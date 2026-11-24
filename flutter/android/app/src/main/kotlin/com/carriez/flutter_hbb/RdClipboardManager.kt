@@ -155,7 +155,12 @@ class RdClipboardManager(private val clipboardManager: ClipboardManager) {
 
     @Keep
     fun rustUpdateClipboard(clips: ByteArray) {
-        val clips = MultiClipboards.parseFrom(clips)
+        val clips = try {
+            MultiClipboards.parseFrom(clips)
+        } catch (e: Exception) {
+            Log.w(logTag, "Invalid clipboard payload: ${e.message}")
+            return
+        }
         var mimeTypes = mutableListOf<String>()
         var text: String? = null
         var html: String? = null

@@ -77,13 +77,19 @@ class FloatingWindowService : Service(), View.OnTouchListener {
             Log.d(logTag, "onCreate success")
         } catch (e: Exception) {
             Log.d(logTag, "onCreate failed: $e")
+            stopSelf()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         if (viewCreated) {
-            windowManager.removeView(floatingView)
+            try {
+                windowManager.removeView(floatingView)
+            } catch (e: Exception) {
+                Log.w(logTag, "removeView failed: $e")
+            }
+            viewCreated = false
         }
         handler.removeCallbacks(runnable)
     }
@@ -91,7 +97,6 @@ class FloatingWindowService : Service(), View.OnTouchListener {
     @SuppressLint("ClickableViewAccessibility")
     private fun createView(windowManager: WindowManager) {
         floatingView = ImageView(this)
-        viewCreated = true
         originalDrawable = resources.getDrawable(R.drawable.floating_window, null)
         if (customSvg.isNotEmpty()) {
             try {
@@ -174,6 +179,7 @@ class FloatingWindowService : Service(), View.OnTouchListener {
         updateKeepScreenOnLayoutParams()
 
         windowManager.addView(floatingView, layoutParams)
+        viewCreated = true
         moveToScreenSide()
     }
 

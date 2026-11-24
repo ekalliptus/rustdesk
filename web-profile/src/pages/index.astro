@@ -1,0 +1,132 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DownloadPortal } from "@/components/DownloadPortal";
+import { DEFAULT_API_HEALTH_URL, DEFAULT_LATEST_JSON_URL } from "@/lib/release";
+
+const latestJsonUrl = import.meta.env.PUBLIC_LATEST_JSON_URL || DEFAULT_LATEST_JSON_URL;
+const apiHealthUrl = import.meta.env.PUBLIC_API_HEALTH_URL || DEFAULT_API_HEALTH_URL;
+---
+
+<BaseLayout
+  title="EL-Desk | Private Remote Desktop Downloads"
+  description="Installers, SHA-256 checksums, release changelog, and service status for the private EL-Desk remote desktop fleet."
+>
+  <DownloadPortal client:load manifestUrl={latestJsonUrl} apiHealthUrl={apiHealthUrl}>
+    <div class="space-y-4">
+      <h1
+        id="downloads-heading"
+        class="text-3xl font-bold tracking-tight text-[var(--text)] sm:text-4xl"
+      >
+        EL-Desk client downloads
+      </h1>
+      <p class="max-w-2xl text-base leading-relaxed text-[var(--text-muted)]">
+        Private builds for Windows, Linux, macOS, and Android compiled with mandatory relay
+        encryption and pinned endpoints for{" "}
+        <span class="font-mono text-sm text-[var(--text)]">relay.desk.ekalliptus.com</span> and{" "}
+        <span class="font-mono text-sm text-[var(--text)]">api.desk.ekalliptus.com</span>.
+      </p>
+      <p class="max-w-2xl text-sm leading-relaxed text-[var(--text-muted)]">
+        Installers never touch public RustDesk rendezvous servers. Every binary is verified with
+        SHA-256 digests generated during the release build and served directly from Cloudflare R2.
+      </p>
+    </div>
+  </DownloadPortal>
+
+  <!-- Band 4: Asymmetric Infrastructure Specification -->
+  <section
+    id="infrastructure"
+    aria-labelledby="infrastructure-heading"
+    class="border-t border-[var(--border)] bg-[var(--surface)]"
+  >
+    <div class="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
+      <div class="grid gap-8 lg:grid-cols-12">
+        <div class="space-y-3 lg:col-span-4">
+          <h2
+            id="infrastructure-heading"
+            class="text-xl font-semibold tracking-tight text-[var(--text)] sm:text-2xl"
+          >
+            Infrastructure layout
+          </h2>
+          <p class="text-sm leading-relaxed text-[var(--text-muted)]">
+            Client binaries lock server identity at compile time. Rendezvous and relay traffic run
+            directly on host networking without Cloudflare proxying, while account and address book
+            state stays on the Go API backed by NeonDB.
+          </p>
+          <p class="text-sm leading-relaxed text-[var(--text-muted)]">
+            Heartbeat requests stay in memory with a 45-second TTL so NeonDB scales to zero between
+            active sign-ins and address book edits.
+          </p>
+        </div>
+
+        <div class="lg:col-span-8">
+          <div class="hidden overflow-x-auto rounded-[6px] border border-[var(--border)] sm:block">
+            <table class="w-full border-collapse text-left text-sm">
+              <thead>
+                <tr class="border-b border-[var(--border)] bg-[var(--surface-subtle)] text-xs font-semibold text-[var(--text-muted)]">
+                  <th scope="col" class="px-4 py-3">Hostname</th>
+                  <th scope="col" class="px-4 py-3">Hosting</th>
+                  <th scope="col" class="px-4 py-3">Cloudflare mode</th>
+                  <th scope="col" class="px-4 py-3">Responsibility</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[var(--border)] bg-[var(--bg)]">
+                <tr>
+                  <td class="px-4 py-3 font-mono text-xs text-[var(--text)]">desk.ekalliptus.com</td>
+                  <td class="px-4 py-3 text-[var(--text)]">Cloudflare Pages</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">Proxied</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">Static portal, checksums, privacy notice</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-3 font-mono text-xs text-[var(--text)]">dl.desk.ekalliptus.com</td>
+                  <td class="px-4 py-3 text-[var(--text)]">Cloudflare R2</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">Proxied</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">Installers, APK, latest.json, SHA256SUMS.txt</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-3 font-mono text-xs text-[var(--text)]">api.desk.ekalliptus.com</td>
+                  <td class="px-4 py-3 text-[var(--text)]">VPS Docker + Nginx</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">Proxied</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">Go API (auth, address book, audit, memory presence)</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-3 font-mono text-xs text-[var(--text)]">relay.desk.ekalliptus.com</td>
+                  <td class="px-4 py-3 text-[var(--text)]">VPS Host Net</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">DNS Only</td>
+                  <td class="px-4 py-3 text-[var(--text-muted)]">hbbs and hbbr on TCP/UDP 21115 to 21119 (-k _)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Mobile stacked specification list -->
+          <dl class="space-y-3 sm:hidden">
+            <div class="rounded-[6px] border border-[var(--border)] bg-[var(--bg)] p-4 space-y-1">
+              <dt class="font-mono text-xs font-semibold text-[var(--text)]">desk.ekalliptus.com</dt>
+              <dd class="text-xs text-[var(--text-muted)]">
+                Cloudflare Pages (Proxied): Static portal, checksums, privacy notice.
+              </dd>
+            </div>
+            <div class="rounded-[6px] border border-[var(--border)] bg-[var(--bg)] p-4 space-y-1">
+              <dt class="font-mono text-xs font-semibold text-[var(--text)]">dl.desk.ekalliptus.com</dt>
+              <dd class="text-xs text-[var(--text-muted)]">
+                Cloudflare R2 (Proxied): Installers, APK, latest.json, SHA256SUMS.txt.
+              </dd>
+            </div>
+            <div class="rounded-[6px] border border-[var(--border)] bg-[var(--bg)] p-4 space-y-1">
+              <dt class="font-mono text-xs font-semibold text-[var(--text)]">api.desk.ekalliptus.com</dt>
+              <dd class="text-xs text-[var(--text-muted)]">
+                VPS Docker + Nginx (Proxied): Go API for auth, address book, audit, in-memory heartbeats.
+              </dd>
+            </div>
+            <div class="rounded-[6px] border border-[var(--border)] bg-[var(--bg)] p-4 space-y-1">
+              <dt class="font-mono text-xs font-semibold text-[var(--text)]">relay.desk.ekalliptus.com</dt>
+              <dd class="text-xs text-[var(--text-muted)]">
+                VPS Host Net (DNS Only): hbbs and hbbr on TCP/UDP 21115 to 21119 (-k _).
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

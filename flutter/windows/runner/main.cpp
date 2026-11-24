@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include "win32_desktop.h"
 #include "flutter_window.h"
@@ -21,13 +23,57 @@ const std::vector<std::string> parameters_white_list = {"--install", "--cm"};
 
 const wchar_t* getWindowClassName();
 
+static void HardenDllSearchPath() {
+  HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+  if (kernel32) {
+    using SetDefaultDllDirectoriesFn = BOOL(WINAPI*)(DWORD);
+    auto set_default_dll_dirs = reinterpret_cast<SetDefaultDllDirectoriesFn>(
+        GetProcAddress(kernel32, "SetDefaultDllDirectories"));
+    if (set_default_dll_dirs) {
+      set_default_dll_dirs(LOAD_LIBRARY_SEARCH_SYSTEM32 |
+                           LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
+                           LOAD_LIBRARY_SEARCH_USER_DIRS);
+    }
+  }
+  SetDllDirectoryW(L"");
+}
+
+static HINSTANCE LoadRustdeskCoreDll() {
+  std::vector<wchar_t> buf(MAX_PATH, L'\0');
+  DWORD len = 0;
+  for (;;) {
+    len = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (len == 0) {
+      return nullptr;
+    }
+    if (len < buf.size() - 1) {
+      break;
+    }
+    buf.resize(buf.size() * 2, L'\0');
+  }
+  std::wstring exe_path(buf.data(), len);
+  size_t pos = exe_path.find_last_of(L"\\/");
+  if (pos == std::wstring::npos) {
+    return nullptr;
+  }
+  std::wstring dll_path = exe_path.substr(0, pos + 1) + L"librustdesk.dll";
+  HINSTANCE h = LoadLibraryExW(
+      dll_path.c_str(), nullptr,
+      LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (!h && GetLastError() == ERROR_INVALID_PARAMETER) {
+    h = LoadLibraryW(dll_path.c_str());
+  }
+  return h;
+}
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command)
 {
+  HardenDllSearchPath();
   if (auto result = service_control::HandleCommand(command_line)) {
     return static_cast<int>(*result);
   }
-  HINSTANCE hInstance = LoadLibraryA("librustdesk.dll");
+  HINSTANCE hInstance = LoadRustdeskCoreDll();
   if (!hInstance)
   {
     std::cout << "Failed to load librustdesk.dll." << std::endl;

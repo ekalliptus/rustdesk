@@ -47,7 +47,7 @@ use hbb_common::{
     bail,
     config::{
         self, use_ws, Config, LocalConfig, PeerConfig, PeerInfoSerde, Resolution,
-        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS,
+        CONNECT_TIMEOUT, READ_TIMEOUT, RELAY_PORT, RENDEZVOUS_PORT,
     },
     futures::future::{select_ok, BoxFuture, FutureExt},
     get_version_number, log,
@@ -477,11 +477,11 @@ impl Client {
         } else {
             if other_server == PUBLIC_SERVER {
                 (
-                    check_port(RENDEZVOUS_SERVERS[0], RENDEZVOUS_PORT),
-                    RENDEZVOUS_SERVERS[1..]
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect(),
+                    check_port(
+                        base::private_config::rendezvous_server(),
+                        RENDEZVOUS_PORT,
+                    ),
+                    Vec::new(),
                     true,
                 )
             } else {
@@ -1659,7 +1659,7 @@ impl Client {
         conn: &mut Stream,
     ) -> ResultType<Option<Vec<u8>>> {
         let rs_pk = get_rs_pk(if key.is_empty() {
-            config::RS_PUB_KEY
+            base::private_config::rs_pub_key()
         } else {
             key
         });
@@ -1690,13 +1690,7 @@ impl Client {
         let sign_pk = match sign_pk {
             Some(v) => v,
             None => {
-                // No trusted peer identity (key-less deployment, or a blob that does not verify
-                // under our root), so no fingerprint binding is possible. Fall through like TCP's
-                // non-secure path with is_secured() false: bailing would only move the session to
-                // a relay that fails the same check and then runs in plaintext.
-                // send an empty message out in case server is setting up secure and waiting for first message
-                conn.send(&Message::new()).await?;
-                return Ok(option_pk);
+                bail!("Handshake failed: peer identity could not be verified");
             }
         };
         match timeout(READ_TIMEOUT, conn.next()).await? {
@@ -1748,35 +1742,16 @@ impl Client {
                                     },
                                 )?;
                             } else {
-                                if is_webrtc {
-                                    bail!("WebRTC handshake id mismatch (possible MITM)");
-                                }
-                                log::error!("Handshake failed: sign failure");
-                                conn.send(&Message::new()).await?;
+                                bail!("Handshake failed: peer id mismatch (possible MITM)");
                             }
                         } else {
-                            if is_webrtc {
-                                bail!("WebRTC peer identity could not be verified (refusing unbound channel)");
-                            }
-                            // fall back to non-secure connection in case pk mismatch
-                            log::info!("pk mismatch, fall back to non-secure");
-                            let mut msg_out = Message::new();
-                            msg_out.set_public_key(PublicKey::new());
-                            conn.send(&msg_out).await?;
+                            bail!("Handshake failed: peer identity signature could not be verified");
                         }
                     } else {
-                        if is_webrtc {
-                            bail!("WebRTC handshake received an unexpected message type");
-                        }
-                        log::error!("Handshake failed: invalid message type");
-                        conn.send(&Message::new()).await?;
+                        bail!("Handshake failed: unexpected message type");
                     }
                 } else {
-                    if is_webrtc {
-                        bail!("WebRTC handshake received a malformed message");
-                    }
-                    log::error!("Handshake failed: invalid message format");
-                    conn.send(&Message::new()).await?;
+                    bail!("Handshake failed: invalid message format");
                 }
             }
             None => {
@@ -2925,7 +2900,7 @@ impl LoginConfigHandler {
             let server = server_key.next().unwrap_or_default();
             let args = server_key.next().unwrap_or_default();
             let key = if server == PUBLIC_SERVER {
-                config::RS_PUB_KEY.to_owned()
+                base::private_config::rs_pub_key().to_owned()
             } else {
                 let mut args_map: HashMap<String, &str> = HashMap::new();
                 for arg in args.split('&') {

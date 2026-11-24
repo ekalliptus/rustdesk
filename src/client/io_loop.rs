@@ -238,7 +238,6 @@ impl<T: InvokeUiSession> Remote<T> {
                 self.handler
                     .set_connection_type(is_secured, direct, stream_type); // flutter -> connection_ready
                 if !is_secured
-                    && !crate::common::is_direct_ip_access(&self.handler.get_id())
                     && !client::confirm_insecure_connection(&self.handler, &mut self.receiver).await
                 {
                     self.send_close_reason(&mut peer, "").await;
@@ -1483,8 +1482,7 @@ impl<T: InvokeUiSession> Remote<T> {
         if !self.peer_info.is_support_virtual_display() {
             return;
         }
-        let lc = self.handler.lc.read().unwrap();
-        let displays = lc.get_option("virtual-display");
+        let displays = self.handler.lc.read().unwrap().get_option("virtual-display");
         for d in displays.split(',') {
             if let Ok(index) = d.parse::<i32>() {
                 let mut misc = Misc::new();
@@ -1504,11 +1502,15 @@ impl<T: InvokeUiSession> Remote<T> {
         if self.handler.is_view_camera() {
             return;
         }
-        let lc = self.handler.lc.read().unwrap();
-        if lc.version >= hbb_common::get_version_number("1.2.4")
-            && lc.get_toggle_option("privacy-mode")
-        {
-            let impl_key = lc.get_option("privacy-mode-impl-key");
+        let (version, privacy_mode_enabled, impl_key) = {
+            let lc = self.handler.lc.read().unwrap();
+            (
+                lc.version,
+                lc.get_toggle_option("privacy-mode"),
+                lc.get_option("privacy-mode-impl-key"),
+            )
+        };
+        if version >= hbb_common::get_version_number("1.2.4") && privacy_mode_enabled {
             if impl_key == crate::privacy_mode::PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY
                 && !self.peer_info.is_support_virtual_display()
             {

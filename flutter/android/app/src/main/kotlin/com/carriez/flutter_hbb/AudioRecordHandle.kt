@@ -49,6 +49,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
     private var audioRecorder: AudioRecord? = null
     private var audioReader: AudioReader? = null
     private var minBufferSize = 0
+    @Volatile
     private var audioRecordStat = false
     private var audioThread: Thread? = null
     private var playbackCapturePending = false
@@ -226,6 +227,19 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
         return switched
     }
 
+    private fun stopAudioThread() {
+        audioRecordStat = false
+        try {
+            audioRecorder?.stop()
+        } catch (_: Exception) {}
+        try {
+            audioThread?.join(500)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        audioThread = null
+    }
+
     @RequiresApi(Build.VERSION_CODES.M)
     fun switchToVoiceCall(mediaProjection: MediaProjection?): Boolean {
         audioRecorder?.let {
@@ -234,9 +248,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
             }
             playbackCapturePending = true
         }
-        audioRecordStat = false
-        audioThread?.join()
-        audioThread = null
+        stopAudioThread()
 
         if (!createAudioRecorder(true, mediaProjection)) {
             Log.e(logTag, "createAudioRecorder fail")
@@ -251,8 +263,7 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
             return true
         }
         playbackCapturePending = true
-        audioRecordStat = false
-        audioThread?.join()
+        stopAudioThread()
 
         if (!createAudioRecorder(false, mediaProjection)) {
             Log.e(logTag, "createAudioRecorder fail")
@@ -269,16 +280,13 @@ class AudioRecordHandle(private var context: Context, private var isVideoStart: 
         if (isAudioStart() || isVideoStart()) {
             return
         }
-        audioRecordStat = false
-        audioThread?.join()
-        audioThread = null
+        stopAudioThread()
         playbackCapturePending = false
     }
 
     fun destroy() {
         Log.d(logTag, "destroy audio record handle")
 
-        audioRecordStat = false
-        audioThread?.join()
+        stopAudioThread()
     }
 }

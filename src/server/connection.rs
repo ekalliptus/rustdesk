@@ -896,8 +896,12 @@ impl Connection {
                                         if conn_id == conn.inner.id() {
                                             let impl_key =
                                                 privacy_mode::get_cur_impl_key().unwrap_or_default();
-                                            let turn_off_res =
-                                                privacy_mode::turn_off_privacy(conn_id, None);
+                                            let turn_off_res = tokio::task::spawn_blocking(move || {
+                                                privacy_mode::turn_off_privacy(conn_id, None)
+                                            })
+                                            .await
+                                            .ok()
+                                            .flatten();
                                             match turn_off_res {
                                                 Some(Ok(_)) => {
                                                     let msg_out = crate::common::make_privacy_mode_msg(
@@ -7215,12 +7219,29 @@ mod raii {
                     *WALLPAPER_REMOVER.lock().unwrap() = None;
                 }
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                display_service::restore_resolutions();
-                #[cfg(windows)]
-                let _ = virtual_display_manager::reset_all();
-                #[cfg(target_os = "linux")]
-                if self.1 == AuthConnType::Remote || self.1 == AuthConnType::ViewCamera {
-                    wayland::try_close_portal_session();
+                {
+                    #[cfg(target_os = "linux")]
+                    let conn_type = self.1;
+                    std::thread::spawn(move || {
+                        let remote_count = AUTHED_CONNS
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|c| c.conn_type == AuthConnType::Remote)
+                            .count();
+                        if remote_count != 0 {
+                            return;
+                        }
+                        display_service::restore_resolutions();
+                        #[cfg(windows)]
+                        let _ = virtual_display_manager::reset_all();
+                        #[cfg(target_os = "linux")]
+                        if conn_type == AuthConnType::Remote
+                            || conn_type == AuthConnType::ViewCamera
+                        {
+                            wayland::try_close_portal_session();
+                        }
+                    });
                 }
             }
             Self::check_wake_lock();

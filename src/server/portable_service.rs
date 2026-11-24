@@ -311,8 +311,19 @@ impl SharedMemory {
     }
 
     pub fn write(&self, addr: usize, data: &[u8]) {
+        if addr
+            .checked_add(data.len())
+            .map_or(true, |end| end > self.inner.len())
+        {
+            log::error!(
+                "SharedMemory::write out of bounds: addr={}, len={}, cap={}",
+                addr,
+                data.len(),
+                self.inner.len()
+            );
+            return;
+        }
         unsafe {
-            debug_assert!(addr + data.len() <= self.inner.len());
             let ptr = self.inner.as_ptr().add(addr);
             let shared_mem_slice = slice::from_raw_parts_mut(ptr, data.len());
             shared_mem_slice.copy_from_slice(data);
@@ -344,7 +355,10 @@ impl SharedMemory {
 
 mod utils {
     use core::slice;
-    use std::mem::size_of;
+    use std::{
+        mem::size_of,
+        sync::atomic::{fence, Ordering},
+    };
 
     use super::{
         CapturerPara, FrameInfo, SharedMemory, ADDR_CAPTURER_PARA, ADDR_CAPTURE_FRAME_INFO,
@@ -358,8 +372,19 @@ mod utils {
     #[inline]
     pub fn ptr_to_i32(ptr: *const u8) -> i32 {
         unsafe {
-            let v = slice::from_raw_parts(ptr, size_of::<i32>());
-            i32::from_ne_bytes([v[0], v[1], v[2], v[3]])
+            fence(Ordering::SeqCst);
+            let bytes = std::ptr::read_volatile(ptr as *const [u8; size_of::<i32>()]);
+            fence(Ordering::SeqCst);
+            i32::from_ne_bytes(bytes)
+        }
+    }
+
+    #[inline]
+    fn write_i32(ptr: *mut u8, val: i32) {
+        unsafe {
+            fence(Ordering::SeqCst);
+            std::ptr::write_volatile(ptr as *mut [u8; size_of::<i32>()], val.to_ne_bytes());
+            fence(Ordering::SeqCst);
         }
     }
 
@@ -371,7 +396,7 @@ mod utils {
             let iw = ptr_to_i32(wptr);
             let ir = ptr_to_i32(rptr);
             if ir != iw {
-                std::ptr::copy_nonoverlapping(wptr, rptr as *mut _, size_of::<i32>());
+                write_i32(rptr as *mut u8, iw);
                 true
             } else {
                 false
@@ -395,14 +420,12 @@ mod utils {
         unsafe {
             let wptr = counter;
             let rptr = counter.add(size_of::<i32>());
-            let iw = ptr_to_i32(counter);
-            let ir = ptr_to_i32(counter);
+            let iw = ptr_to_i32(wptr);
+            let ir = ptr_to_i32(rptr);
             let iw_plus1 = if iw == i32::MAX { 0 } else { iw + 1 };
-            let v = i32_to_vec(iw_plus1);
-            std::ptr::copy_nonoverlapping(v.as_ptr(), wptr, size_of::<i32>());
+            write_i32(wptr, iw_plus1);
             if ir == iw_plus1 {
-                let v = i32_to_vec(iw);
-                std::ptr::copy_nonoverlapping(v.as_ptr(), rptr, size_of::<i32>());
+                write_i32(rptr, iw);
             }
         }
     }
@@ -594,7 +617,7 @@ pub mod server {
             unsafe {
                 let para_ptr = shmem.as_ptr().add(ADDR_CAPTURER_PARA);
                 let para = para_ptr as *const CapturerPara;
-                let recreate = (*para).recreate;
+                let recreate = (*para).recreate != 0;
                 let current_display = (*para).current_display;
                 let timeout_ms = (*para).timeout_ms;
                 if c.is_none() {
@@ -623,7 +646,7 @@ pub mod server {
                                 utils::set_para(
                                     &shmem,
                                     CapturerPara {
-                                        recreate: false,
+                                        recreate: 0,
                                         current_display: (*para).current_display,
                                         timeout_ms: (*para).timeout_ms,
                                     },
@@ -1207,7 +1230,7 @@ pub mod client {
                 utils::set_para(
                     shmem,
                     CapturerPara {
-                        recreate: true,
+                        recreate: 1,
                         current_display,
                         timeout_ms: 33,
                     },
@@ -1580,7 +1603,7 @@ pub mod client {
 
 #[repr(C)]
 pub struct CapturerPara {
-    recreate: bool,
+    recreate: u32,
     current_display: usize,
     timeout_ms: i32,
 }

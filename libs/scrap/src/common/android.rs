@@ -36,12 +36,18 @@ impl Capturer {
 
 impl crate::TraitCapturer for Capturer {
     fn frame<'a>(&'a mut self, _timeout: Duration) -> io::Result<Frame<'a>> {
-        if get_video_raw(&mut self.rgba, &mut self.saved_raw_data).is_some() {
-            Ok(Frame::PixelBuffer(PixelBuffer::new(
-                &self.rgba,
-                self.width(),
-                self.height(),
-            )))
+        let w = self.width();
+        let h = self.height();
+        if w == 0 || h == 0 {
+            return Err(io::ErrorKind::WouldBlock.into());
+        }
+        let Some(expected_len) = w.checked_mul(h).and_then(|v| v.checked_mul(4)) else {
+            return Err(io::ErrorKind::WouldBlock.into());
+        };
+        if get_video_raw(&mut self.rgba, &mut self.saved_raw_data).is_some()
+            && self.rgba.len() >= expected_len
+        {
+            Ok(Frame::PixelBuffer(PixelBuffer::new(&self.rgba, w, h)))
         } else {
             return Err(io::ErrorKind::WouldBlock.into());
         }
@@ -57,7 +63,7 @@ pub struct PixelBuffer<'a> {
 
 impl<'a> PixelBuffer<'a> {
     pub fn new(data: &'a [u8], width: usize, height: usize) -> Self {
-        let stride0 = data.len() / height;
+        let stride0 = if height > 0 { data.len() / height } else { 0 };
         let mut stride = Vec::new();
         stride.push(stride0);
         PixelBuffer {

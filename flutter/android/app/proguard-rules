@@ -5,3 +5,6 @@
 
 # Keep rustls-platform-verifier classes for JNI
 -keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
+
+# Keep JNI FFI class and native/static entrypoints
+-keep class ffi.FFI { *; }

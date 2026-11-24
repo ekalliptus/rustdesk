@@ -1,12 +1,9 @@
-use jni::objects::JByteBuffer;
-use jni::objects::JString;
-use jni::objects::JValue;
-use jni::sys::jboolean;
-use jni::JNIEnv;
 use jni::{
-    objects::{GlobalRef, JClass, JObject},
+    errors::{Error as JniError, Result as JniResult},
+    objects::{GlobalRef, JByteBuffer, JClass, JObject, JString, JValue},
     strings::JNIString,
-    JavaVM,
+    sys::{jboolean, jint},
+    JNIEnv, JavaVM,
 };
 
 use base::message_proto::MultiClipboards;
@@ -73,6 +70,59 @@ impl FrameRaw {
         self.last_update = Instant::now();
     }
 
+    fn update_rgba(
+        &mut self,
+        data: *mut u8,
+        len: usize,
+        width: usize,
+        height: usize,
+        row_stride: usize,
+    ) {
+        if self.enable.not()
+            || data.is_null()
+            || len == 0
+            || width == 0
+            || height == 0
+            || row_stride == 0
+        {
+            return;
+        }
+        let Some(row_bytes) = width.checked_mul(4) else {
+            return;
+        };
+        if row_stride < row_bytes {
+            return;
+        }
+        let Some(packed_len) = row_bytes.checked_mul(height) else {
+            return;
+        };
+        let src = unsafe { std::slice::from_raw_parts(data, len) };
+        self.data.clear();
+        if row_stride == row_bytes {
+            let copy_len = packed_len.min(src.len());
+            self.data.extend_from_slice(&src[..copy_len]);
+            if copy_len < packed_len {
+                self.data.resize(packed_len, 0);
+            }
+        } else {
+            self.data.resize(packed_len, 0);
+            for y in 0..height {
+                let Some(src_start) = y.checked_mul(row_stride) else {
+                    break;
+                };
+                if src_start >= src.len() {
+                    break;
+                }
+                let avail = (src.len() - src_start).min(row_bytes);
+                let dst_start = y * row_bytes;
+                self.data[dst_start..dst_start + avail]
+                    .copy_from_slice(&src[src_start..src_start + avail]);
+            }
+        }
+        self.ready = true;
+        self.last_update = Instant::now();
+    }
+
     fn take<'a>(&mut self, dst: &mut Vec<u8>, last: &mut Vec<u8>) -> Option<()> {
         if self.enable.not() || !self.ready {
             return None;
@@ -114,11 +164,19 @@ pub extern "system" fn Java_ffi_FFI_onVideoFrameUpdate(
     env: JNIEnv,
     _class: JClass,
     buffer: JObject,
+    width: jint,
+    height: jint,
+    row_stride: jint,
 ) {
+    if width <= 0 || height <= 0 || row_stride <= 0 {
+        return;
+    }
     let jb = JByteBuffer::from(buffer);
     if let Ok(data) = env.get_direct_buffer_address(&jb) {
         if let Ok(len) = env.get_direct_buffer_capacity(&jb) {
-            VIDEO_RAW.lock().unwrap().update(data, len);
+            if let Ok(mut video_raw) = VIDEO_RAW.lock() {
+                video_raw.update_rgba(data, len, width as usize, height as usize, row_stride as usize);
+            }
         }
     }
 }
@@ -145,13 +203,18 @@ pub extern "system" fn Java_ffi_FFI_onClipboardUpdate(
 ) {
     if let Ok(data) = env.get_direct_buffer_address(&buffer) {
         if let Ok(len) = env.get_direct_buffer_capacity(&buffer) {
+            if data.is_null() || len < 1 {
+                return;
+            }
             let data = unsafe { std::slice::from_raw_parts(data, len) };
             if let Ok(clips) = MultiClipboards::parse_from_bytes(&data[1..]) {
                 let is_client = data[0] == 1;
                 if is_client {
-                    *CLIPBOARDS_CLIENT.lock().unwrap() = Some(clips);
-                } else {
-                    *CLIPBOARDS_HOST.lock().unwrap() = Some(clips);
+                    if let Ok(mut guard) = CLIPBOARDS_CLIENT.lock() {
+                        *guard = Some(clips);
+                    }
+                } else if let Ok(mut guard) = CLIPBOARDS_HOST.lock() {
+                    *guard = Some(clips);
                 }
             }
         }
@@ -280,6 +343,12 @@ pub fn clear_codec_info() {
             Ok(JObject::null())
         })?;
 */
+fn clear_pending_exception(env: &mut JNIEnv) {
+    if let Ok(true) = env.exception_check() {
+        let _ = env.exception_clear();
+    }
+}
+
 pub fn call_main_service_pointer_input(kind: &str, mask: i32, x: i32, y: i32) -> JniResult<()> {
     if let (Some(jvm), Some(ctx)) = (
         JVM.read().unwrap().as_ref(),
@@ -287,7 +356,7 @@ pub fn call_main_service_pointer_input(kind: &str, mask: i32, x: i32, y: i32) ->
     ) {
         let mut env = jvm.attach_current_thread_as_daemon()?;
         let kind = if kind == "touch" { 0 } else { 1 };
-        env.call_method(
+        let res = env.call_method(
             ctx,
             "rustPointerInput",
             "(IIII)V",
@@ -297,7 +366,11 @@ pub fn call_main_service_pointer_input(kind: &str, mask: i32, x: i32, y: i32) ->
                 JValue::Int(x),
                 JValue::Int(y),
             ],
-        )?;
+        );
+        if res.is_err() {
+            clear_pending_exception(&mut env);
+        }
+        res?;
         return Ok(());
     } else {
         return Err(JniError::ThrowFailed(-1));
@@ -310,14 +383,20 @@ pub fn call_main_service_key_event(data: &[u8]) -> JniResult<()> {
         MAIN_SERVICE_CTX.read().unwrap().as_ref(),
     ) {
         let mut env = jvm.attach_current_thread_as_daemon()?;
-        let data = env.byte_array_from_slice(data)?;
-
-        env.call_method(
-            ctx,
-            "rustKeyEventInput",
-            "([B)V",
-            &[JValue::Object(&JObject::from(data))],
-        )?;
+        let res = env.with_local_frame(8, |env| -> JniResult<()> {
+            let data = env.byte_array_from_slice(data)?;
+            env.call_method(
+                ctx,
+                "rustKeyEventInput",
+                "([B)V",
+                &[JValue::Object(&JObject::from(data))],
+            )?;
+            Ok(())
+        });
+        if res.is_err() {
+            clear_pending_exception(&mut env);
+        }
+        res?;
         return Ok(());
     } else {
         return Err(JniError::ThrowFailed(-1));
@@ -334,7 +413,11 @@ where
         CLIPBOARD_MANAGER.read().unwrap().as_ref(),
     ) {
         let mut env = jvm.attach_current_thread()?;
-        env.call_method(cm, name, sig, args)?;
+        let res = env.call_method(cm, name, sig, args);
+        if res.is_err() {
+            clear_pending_exception(&mut env);
+        }
+        res?;
         return Ok(());
     } else {
         return Err(JniError::ThrowFailed(-1));
@@ -347,14 +430,20 @@ pub fn call_clipboard_manager_update_clipboard(data: &[u8]) -> JniResult<()> {
         CLIPBOARD_MANAGER.read().unwrap().as_ref(),
     ) {
         let mut env = jvm.attach_current_thread()?;
-        let data = env.byte_array_from_slice(data)?;
-
-        env.call_method(
-            cm,
-            "rustUpdateClipboard",
-            "([B)V",
-            &[JValue::Object(&JObject::from(data))],
-        )?;
+        let res = env.with_local_frame(8, |env| -> JniResult<()> {
+            let data = env.byte_array_from_slice(data)?;
+            env.call_method(
+                cm,
+                "rustUpdateClipboard",
+                "([B)V",
+                &[JValue::Object(&JObject::from(data))],
+            )?;
+            Ok(())
+        });
+        if res.is_err() {
+            clear_pending_exception(&mut env);
+        }
+        res?;
         return Ok(());
     } else {
         return Err(JniError::ThrowFailed(-1));
@@ -389,8 +478,11 @@ pub fn call_main_service_get_by_name(name: &str) -> JniResult<String> {
             let res = env.get_string(&res)?;
             let res = res.to_string_lossy().to_string();
             Ok(res)
-        })?;
-        Ok(res)
+        });
+        if res.is_err() {
+            clear_pending_exception(&mut env);
+        }
+        res
     } else {
         return Err(JniError::ThrowFailed(-1));
     }
@@ -406,7 +498,7 @@ pub fn call_main_service_set_by_name(
         MAIN_SERVICE_CTX.read().unwrap().as_ref(),
     ) {
         let mut env = jvm.attach_current_thread_as_daemon()?;
-        env.with_local_frame(10, |env| -> JniResult<()> {
+        let res = env.with_local_frame(10, |env| -> JniResult<()> {
             let name = env.new_string(name)?;
             let arg1 = env.new_string(arg1.unwrap_or(""))?;
             let arg2 = env.new_string(arg2.unwrap_or(""))?;
@@ -422,7 +514,11 @@ pub fn call_main_service_set_by_name(
                 ],
             )?;
             Ok(())
-        })?;
+        });
+        if res.is_err() {
+            clear_pending_exception(&mut env);
+        }
+        res?;
         return Ok(());
     } else {
         return Err(JniError::ThrowFailed(-1));

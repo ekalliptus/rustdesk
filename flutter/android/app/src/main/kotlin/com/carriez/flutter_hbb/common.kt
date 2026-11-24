@@ -68,10 +68,11 @@ const val KEY_APP_DIR_CONFIG_PATH = "KEY_APP_DIR_CONFIG_PATH"
 
 @SuppressLint("ConstantLocale")
 val LOCAL_NAME = Locale.getDefault().toString()
-val SCREEN_INFO = Info(0, 0, 1, 200)
+@Volatile
+var SCREEN_INFO = Info(0, 0, 1, 200)
 
 data class Info(
-    var width: Int, var height: Int, var scale: Int, var dpi: Int
+    val width: Int, val height: Int, val scale: Int, val dpi: Int
 )
 
 fun isSupportVoiceCall(): Boolean {

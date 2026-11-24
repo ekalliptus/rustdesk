@@ -32,8 +32,6 @@ use std::{
     time::{Duration, Instant},
 };
 use wallpaper;
-#[cfg(not(debug_assertions))]
-use winapi::um::libloaderapi::{LoadLibraryExW, LOAD_LIBRARY_SEARCH_USER_DIRS};
 use winapi::{
     ctypes::c_void,
     shared::{minwindef::*, ntdef::NULL, windef::*, winerror::*},
@@ -41,7 +39,9 @@ use winapi::{
         errhandlingapi::GetLastError,
         handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
         libloaderapi::{
-            GetProcAddress, LoadLibraryA, LoadLibraryExA, LOAD_LIBRARY_SEARCH_SYSTEM32,
+            GetProcAddress, LoadLibraryA, LoadLibraryExA, LoadLibraryExW,
+            LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
+            LOAD_LIBRARY_SEARCH_USER_DIRS,
         },
         minwinbase::STILL_ACTIVE,
         processthreadsapi::{
@@ -2251,23 +2251,13 @@ pub fn bootstrap() -> bool {
         *config::EXE_RENDEZVOUS_SERVER.write().unwrap() = lic.host.clone();
     }
 
-    #[cfg(debug_assertions)]
-    {
+    if is_win_10_or_greater() {
+        set_safe_load_dll()
+    } else {
         true
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        // This function will cause `'sciter.dll' was not found neither in PATH nor near the current executable.` when debugging RustDesk.
-        // Only call set_safe_load_dll() on Windows 10 or greater
-        if is_win_10_or_greater() {
-            set_safe_load_dll()
-        } else {
-            true
-        }
     }
 }
 
-#[cfg(not(debug_assertions))]
 fn set_safe_load_dll() -> bool {
     if !unsafe { set_default_dll_directories() } {
         return false;
@@ -2284,7 +2274,6 @@ fn set_safe_load_dll() -> bool {
 }
 
 // https://docs.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-setdefaultdlldirectories
-#[cfg(not(debug_assertions))]
 unsafe fn set_default_dll_directories() -> bool {
     let module = LoadLibraryExW(
         wide_string("Kernel32.dll").as_ptr(),
@@ -2308,7 +2297,12 @@ unsafe fn set_default_dll_directories() -> bool {
             }
             type SetDefaultDllDirectories = unsafe extern "system" fn(DWORD) -> BOOL;
             let func: SetDefaultDllDirectories = std::mem::transmute(func);
-            if func(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS) == FALSE {
+            if func(
+                LOAD_LIBRARY_SEARCH_SYSTEM32
+                    | LOAD_LIBRARY_SEARCH_APPLICATION_DIR
+                    | LOAD_LIBRARY_SEARCH_USER_DIRS,
+            ) == FALSE
+            {
                 eprintln!(
                     "SetDefaultDllDirectories failed: {}",
                     io::Error::last_os_error()

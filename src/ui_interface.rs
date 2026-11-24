@@ -800,6 +800,13 @@ pub fn current_is_wayland() -> bool {
 
 #[inline]
 pub fn get_new_version() -> String {
+    let ver = crate::common::SOFTWARE_UPDATE_VERSION
+        .lock()
+        .unwrap()
+        .clone();
+    if !ver.is_empty() {
+        return ver;
+    }
     SOFTWARE_UPDATE_URL
         .lock()
         .unwrap()

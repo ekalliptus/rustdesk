@@ -914,12 +914,8 @@ async fn handle(data: Data, stream: &mut Connection) {
             allow_err!(stream.send(&Data::OnlineStatus(Some((x, confirmed)))).await);
         }
         Data::ConfirmedKey(None) => {
-            let out = if Config::get_key_confirmed() {
-                Some(Config::get_key_pair())
-            } else {
-                None
-            };
-            allow_err!(stream.send(&Data::ConfirmedKey(out)).await);
+            log::warn!("Rejected IPC request for private ConfirmedKey material");
+            allow_err!(stream.send(&Data::ConfirmedKey(None)).await);
         }
         Data::Socks(s) => match s {
             None => {

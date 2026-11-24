@@ -108,7 +108,7 @@ class PlatformFFI {
       _ffiBind.translate(name: name, locale: locale);
 
   Uint8List? getRgba(SessionID sessionId, int display, int bufSize) {
-    if (_session_get_rgba == null) return null;
+    if (_session_get_rgba == null || bufSize <= 0) return null;
     final sessionIdStr = sessionId.toString();
     var a = sessionIdStr.toNativeUtf8();
     try {
@@ -116,7 +116,7 @@ class PlatformFFI {
       if (buffer == nullptr) {
         return null;
       }
-      final data = buffer.asTypedList(bufSize);
+      final data = Uint8List.fromList(buffer.asTypedList(bufSize));
       return data;
     } finally {
       malloc.free(a);

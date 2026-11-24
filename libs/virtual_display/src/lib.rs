@@ -37,10 +37,10 @@ macro_rules! make_lib_wrapper {
 
         impl LibWrapper {
             fn new() -> Self {
-                let lib = match Library::open(get_lib_name()) {
-                    Ok(lib) => Some(lib),
-                    Err(e) => {
-                        log::warn!("Failed to load library {}, {}", LIB_NAME_VIRTUAL_DISPLAY, e);
+                let lib = match get_lib_path().and_then(|path| Library::open(path).ok()) {
+                    Some(lib) => Some(lib),
+                    None => {
+                        log::warn!("Failed to load library {}", LIB_NAME_VIRTUAL_DISPLAY);
                         None
                     }
                 };
@@ -93,18 +93,20 @@ lazy_static::lazy_static! {
 }
 
 #[cfg(target_os = "windows")]
-fn get_lib_name() -> String {
-    format!("{}.dll", LIB_NAME_VIRTUAL_DISPLAY)
+fn get_lib_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(format!("{}.dll", LIB_NAME_VIRTUAL_DISPLAY))))
 }
 
 #[cfg(target_os = "linux")]
-fn get_lib_name() -> String {
-    format!("lib{}.so", LIB_NAME_VIRTUAL_DISPLAY)
+fn get_lib_path() -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from(format!("lib{}.so", LIB_NAME_VIRTUAL_DISPLAY)))
 }
 
 #[cfg(target_os = "macos")]
-fn get_lib_name() -> String {
-    format!("lib{}.dylib", LIB_NAME_VIRTUAL_DISPLAY)
+fn get_lib_path() -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from(format!("lib{}.dylib", LIB_NAME_VIRTUAL_DISPLAY)))
 }
 
 #[cfg(windows)]

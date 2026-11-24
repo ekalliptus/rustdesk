@@ -431,6 +431,9 @@ impl<'a> Iterator for EncodeFrames<'a> {
                     return None;
                 } else if (*pkt).kind == vpx_codec_cx_pkt_kind::VPX_CODEC_CX_FRAME_PKT {
                     let f = &(*pkt).data.frame;
+                    if f.buf.is_null() || f.sz == 0 {
+                        continue;
+                    }
                     return Some(Self::Item {
                         data: slice::from_raw_parts(f.buf as _, f.sz as _),
                         key: (f.flags & VPX_FRAME_IS_KEY) != 0,

@@ -47,9 +47,10 @@ import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
 
-const val DEFAULT_NOTIFY_TITLE = "RustDesk"
+const val DEFAULT_NOTIFY_TITLE = "EL-Desk"
 const val DEFAULT_NOTIFY_TEXT = "Service is running"
 const val DEFAULT_NOTIFY_ID = 1
+const val MEDIA_PROJECTION_RECOVERY_NOTIFY_ID = 2
 const val NOTIFY_ID_OFFSET = 100
 
 const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_VP9
@@ -259,7 +260,19 @@ class MainService : Service() {
         createForegroundNotification()
     }
 
+    @Synchronized
     override fun onDestroy() {
+        stopCapture()
+        if (reuseVirtualDisplay) {
+            virtualDisplay?.release()
+            virtualDisplay = null
+        }
+        releaseMediaProjection()
+        serviceLooper?.quitSafely()
+        sendVP9Thread.shutdownNow()
+        if (wakeLock.isHeld) {
+            wakeLock.release()
+        }
         checkMediaPermission()
         stopService(Intent(this, FloatingWindowService::class.java))
         super.onDestroy()
@@ -314,11 +327,8 @@ class MainService : Service() {
                 h /= scale
                 dpi /= scale
             }
-            if (SCREEN_INFO.width != w) {
-                SCREEN_INFO.width = w
-                SCREEN_INFO.height = h
-                SCREEN_INFO.scale = scale
-                SCREEN_INFO.dpi = dpi
+            if (SCREEN_INFO.width != w || SCREEN_INFO.height != h || SCREEN_INFO.scale != scale || SCREEN_INFO.dpi != dpi) {
+                SCREEN_INFO = Info(w, h, scale, dpi)
                 if (isStart) {
                     stopCapture()
                     FFI.refreshScreen()
@@ -370,6 +380,33 @@ class MainService : Service() {
         updateScreenInfo(newConfig.orientation)
     }
 
+    private fun postMediaProjectionConsentNotification(intent: Intent) {
+        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.getActivity(
+                this,
+                MEDIA_PROJECTION_RECOVERY_NOTIFY_ID,
+                intent,
+                FLAG_UPDATE_CURRENT or FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getActivity(
+                this,
+                MEDIA_PROJECTION_RECOVERY_NOTIFY_ID,
+                intent,
+                FLAG_UPDATE_CURRENT
+            )
+        }
+        val notification = NotificationCompat.Builder(this, notificationChannel)
+            .setSmallIcon(R.mipmap.ic_stat_logo)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentTitle(DEFAULT_NOTIFY_TITLE)
+            .setContentText(translate("Please grant screen capture permission"))
+            .setContentIntent(pendingIntent)
+            .build()
+        notificationManager.notify(MEDIA_PROJECTION_RECOVERY_NOTIFY_ID, notification)
+    }
+
     private fun requestMediaProjection(recovery: Boolean = false) {
         val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
             action = ACT_REQUEST_MEDIA_PROJECTION
@@ -378,7 +415,21 @@ class MainService : Service() {
                 putExtra(EXT_MEDIA_PROJECTION_RESULT_RECEIVER, mediaProjectionResultReceiver)
             }
         }
-        startActivity(intent)
+        val canStartFromBackground = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            android.provider.Settings.canDrawOverlays(this)
+        if (recovery && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !canStartFromBackground) {
+            Log.w(logTag, "BAL may block background MediaProjection prompt; posting consent notification")
+            cancelMediaProjectionRecovery()
+            postMediaProjectionConsentNotification(intent)
+            return
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.w(logTag, "Failed to start PermissionRequestTransparentActivity: $e")
+            cancelMediaProjectionRecovery()
+            postMediaProjectionConsentNotification(intent)
+        }
     }
 
     @Synchronized
@@ -409,7 +460,7 @@ class MainService : Service() {
                                 val planes = image.planes
                                 val buffer = planes[0].buffer
                                 buffer.rewind()
-                                FFI.onVideoFrameUpdate(buffer)
+                                FFI.onVideoFrameUpdate(buffer, image.width, image.height, planes[0].rowStride)
                             }
                         } catch (ignored: java.lang.Exception) {
                         }
@@ -495,6 +546,7 @@ class MainService : Service() {
         mediaProjection = projection
         mediaProjectionCallback = callback
         _isReady = true
+        notificationManager.cancel(MEDIA_PROJECTION_RECOVERY_NOTIFY_ID)
         checkMediaPermission()
         if (restartCapture) {
             captureRestartPending = false
@@ -670,6 +722,7 @@ class MainService : Service() {
         }
     }
 
+    @Synchronized
     fun destroy() {
         Log.d(logTag, "destroy service")
         _isReady = false
@@ -685,8 +738,18 @@ class MainService : Service() {
         releaseMediaProjection()
         mediaProjectionForegroundService = false
         microphoneForegroundService = false
+        serviceLooper?.quitSafely()
+        sendVP9Thread.shutdownNow()
+        if (wakeLock.isHeld) {
+            wakeLock.release()
+        }
         checkMediaPermission()
-        stopForeground(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopService(Intent(this, FloatingWindowService::class.java))
         stopSelf()
     }

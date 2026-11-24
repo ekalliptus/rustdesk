@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/eldesk_config.dart';
 import 'package:flutter_hbb/common/widgets/audio_input.dart';
 import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -71,8 +72,7 @@ class DesktopSettingPage extends StatefulWidget {
         !bind.isDisableSettings() &&
         bind.mainGetBuildinOption(key: kOptionHideSecuritySetting) != 'Y')
       SettingsTabKey.safety,
-    if (!bind.isDisableSettings() &&
-        bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
+    if (!bind.isDisableSettings() && !elDeskHideNetworkSettings())
       SettingsTabKey.network,
     if (!bind.isIncomingOnly()) SettingsTabKey.display,
     if (!bind.isDisableAccount()) SettingsTabKey.account,
@@ -1830,14 +1830,14 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
   }
 
   Widget network(BuildContext context) {
-    final hideServer =
-        bind.mainGetBuildinOption(key: kOptionHideServerSetting) == 'Y';
+    final hideServer = elDeskHideServerSettings();
     final hideProxy =
         isWeb || bind.mainGetBuildinOption(key: kOptionHideProxySetting) == 'Y';
     final hideWebSocket = isWeb ||
         bind.mainGetBuildinOption(key: kOptionHideWebSocketSetting) == 'Y';
 
-    if (hideServer && hideProxy && hideWebSocket) {
+    if (elDeskHideNetworkSettings() ||
+        (hideServer && hideProxy && hideWebSocket)) {
       return Offstage();
     }
 
@@ -1954,13 +1954,15 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
                     } else {
                       return Column(
                         children: [
-                          if (!hideServer || !hideProxy || !hideWebSocket)
+                          if (!isOptionFixed(kOptionAllowInsecureTLSFallback) &&
+                              (!hideServer || !hideProxy || !hideWebSocket))
                             divider,
-                          switchWidget(
-                              Icons.no_encryption_outlined,
-                              'Allow insecure TLS fallback',
-                              'allow-insecure-tls-fallback-tip',
-                              kOptionAllowInsecureTLSFallback),
+                          if (!isOptionFixed(kOptionAllowInsecureTLSFallback))
+                            switchWidget(
+                                Icons.no_encryption_outlined,
+                                'Allow insecure TLS fallback',
+                                'allow-insecure-tls-fallback-tip',
+                                kOptionAllowInsecureTLSFallback),
                           if (!outgoingOnly) divider,
                           if (!outgoingOnly)
                             listTile(
@@ -2617,7 +2619,7 @@ class _AboutState extends State<_About> {
                       .marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
+                    launchUrlString(kElDeskPrivacyUrl);
                   },
                   child: Text(
                     translate('Privacy Statement'),
@@ -2625,7 +2627,7 @@ class _AboutState extends State<_About> {
                   ).marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com');
+                    launchUrlString(kElDeskWebUrl);
                   },
                   child: Text(
                     translate('Website'),

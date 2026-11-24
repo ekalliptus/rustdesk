@@ -27,8 +27,7 @@ impl Capturer {
             libc::shmget(
                 libc::IPC_PRIVATE,
                 size,
-                // Everyone can do anything.
-                libc::IPC_CREAT | 0o777,
+                libc::IPC_CREAT | 0o600,
             )
         };
 
@@ -41,7 +40,11 @@ impl Capturer {
         let buffer = unsafe { libc::shmat(shmid, ptr::null(), libc::SHM_RDONLY) } as *mut u8;
 
         if buffer as isize == -1 {
-            return Err(io::Error::last_os_error());
+            let err = io::Error::last_os_error();
+            unsafe {
+                libc::shmctl(shmid, libc::IPC_RMID, ptr::null_mut());
+            }
+            return Err(err);
         }
 
         // Attach the segment to XCB.

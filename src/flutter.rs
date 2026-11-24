@@ -666,7 +666,10 @@ impl FlutterHandler {
     pub fn update_use_texture_render(&self) {
         self.use_texture_render
             .store(crate::ui_interface::use_texture_render(), Ordering::Relaxed);
-        self.display_rgbas.write().unwrap().clear();
+        self.display_rgbas
+            .write()
+            .unwrap()
+            .retain(|_, rgba| rgba.valid);
     }
 }
 
@@ -1714,7 +1717,7 @@ fn serialize_resolutions(resolutions: &Vec<Resolution>) -> String {
     serde_json::ser::to_string(&v).unwrap_or("".to_string())
 }
 
-fn char_to_session_id(c: *const char) -> ResultType<SessionID> {
+fn char_to_session_id(c: *const c_char) -> ResultType<SessionID> {
     if c.is_null() {
         bail!("Session id ptr is null");
     }
@@ -1730,13 +1733,13 @@ pub fn session_get_rgba_size(session_id: SessionID, display: usize) -> usize {
             .read()
             .unwrap()
             .get(&display)
-            .map_or(0, |rgba| rgba.data.len());
+            .map_or(0, |rgba| if rgba.valid { rgba.data.len() } else { 0 });
     }
     0
 }
 
 #[no_mangle]
-pub extern "C" fn session_get_rgba(session_uuid_str: *const char, display: usize) -> *const u8 {
+pub extern "C" fn session_get_rgba(session_uuid_str: *const c_char, display: usize) -> *const u8 {
     if let Ok(session_id) = char_to_session_id(session_uuid_str) {
         if let Some(s) = sessions::get_session_by_session_id(&session_id) {
             return s.ui_handler.get_rgba(display);

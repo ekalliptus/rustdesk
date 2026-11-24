@@ -1,0 +1,1025 @@
+name: Release EL-Desk Fork
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag (e.g., v1.5.3; defaults to v<Cargo.toml version>)"
+        required: false
+        type: string
+        default: ""
+      publish_r2:
+        description: "Upload installers, latest.json, and SHA256SUMS.txt to Cloudflare R2"
+        required: false
+        type: boolean
+        default: true
+      targets:
+        description: "Target platforms to build"
+        required: false
+        type: choice
+        default: "all"
+        options:
+          - all
+          - windows-android
+          - windows
+          - linux
+          - macos
+          - android
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.75"
+  MAC_RUST_VERSION: "1.81"
+  CARGO_NDK_VERSION: "3.1.2"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  ANDROID_FLUTTER_VERSION: "3.24.5"
+  FLUTTER_MACOS_ARM_VERSION: "3.44.9"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  NDK_VERSION: "r28c"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  CUSTOM_APP_NAME: ${{ vars.CUSTOM_APP_NAME || 'EL-Desk' }}
+  CUSTOM_WEB_URL: ${{ vars.CUSTOM_WEB_URL || 'https://desk.ekalliptus.com' }}
+  CUSTOM_R2_URL: ${{ vars.CUSTOM_R2_URL || 'https://dl.desk.ekalliptus.com' }}
+  CUSTOM_UPDATE_URL: ${{ vars.CUSTOM_UPDATE_URL || 'https://dl.desk.ekalliptus.com/latest.json' }}
+  CUSTOM_HIDE_SERVER_SETTINGS: ${{ vars.CUSTOM_HIDE_SERVER_SETTINGS || 'true' }}
+  CUSTOM_HIDE_NETWORK_SETTINGS: ${{ vars.CUSTOM_HIDE_NETWORK_SETTINGS || 'false' }}
+  CUSTOM_ENCRYPTED_ONLY: "true"
+
+jobs:
+  preflight:
+    name: Preflight & manifest tests
+    runs-on: ubuntu-24.04
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      version: ${{ steps.meta.outputs.version }}
+      publish_r2: ${{ steps.meta.outputs.publish_r2 }}
+      targets: ${{ steps.meta.outputs.targets }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Resolve release version and validate required secrets
+        id: meta
+        shell: bash
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_PUBLISH_R2: ${{ inputs.publish_r2 }}
+          INPUT_TARGETS: ${{ inputs.targets }}
+          CUSTOM_RS_PUB_KEY: ${{ secrets.CUSTOM_RS_PUB_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_RELEASE_TAG}" ]; then
+            release_tag="${INPUT_RELEASE_TAG}"
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            release_tag="${GITHUB_REF_NAME}"
+          else
+            cargo_ver=$(grep -m1 '^version' Cargo.toml | sed -E 's/version[[:space:]]*=[[:space:]]*"([^"]+)"/\1/')
+            release_tag="v${cargo_ver}"
+          fi
+
+          version="${release_tag#v}"
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "${version}" = "0.0.0" ]; then
+            echo "::error::Invalid release version '${release_tag}'; expected vX.Y.Z"
+            exit 1
+          fi
+          release_tag="v${version}"
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            publish_r2="${INPUT_PUBLISH_R2:-true}"
+            targets="${INPUT_TARGETS:-all}"
+          else
+            publish_r2="true"
+            targets="all"
+          fi
+
+          if [ "${CUSTOM_RS_PUB_KEY}" = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=" ]; then
+            echo "::error::CUSTOM_RS_PUB_KEY must not match the public upstream RustDesk key"
+            exit 1
+          fi
+
+          if [ "${publish_r2}" = "true" ]; then
+            if [ -z "${CUSTOM_RS_PUB_KEY}" ]; then
+              echo "::error::GitHub Secret CUSTOM_RS_PUB_KEY must be set before building publishable EL-Desk clients"
+              exit 1
+            fi
+            for req in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET_NAME; do
+              if [ -z "${!req}" ]; then
+                echo "::error::GitHub Secret ${req} is required when publish_r2=true"
+                exit 1
+              fi
+            done
+          elif [ -z "${CUSTOM_RS_PUB_KEY}" ]; then
+            echo "::warning::CUSTOM_RS_PUB_KEY is not set; building dry-run test artifact only (clients will not connect until rebuilt with your hbbs public key)"
+          fi
+
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "publish_r2=${publish_r2}" >> "${GITHUB_OUTPUT}"
+          echo "targets=${targets}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved release_tag=${release_tag}, version=${version}, publish_r2=${publish_r2}, targets=${targets}"
+
+      - name: Install Rust toolchain for base crate tests
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: preflight-base
+
+      - name: Run Rust base crate and manifest generator unit tests
+        env:
+          CUSTOM_RENDEZVOUS_SERVER: ${{ secrets.CUSTOM_RENDEZVOUS_SERVER || vars.CUSTOM_RENDEZVOUS_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RELAY_SERVER: ${{ secrets.CUSTOM_RELAY_SERVER || vars.CUSTOM_RELAY_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_API_SERVER: ${{ secrets.CUSTOM_API_SERVER || vars.CUSTOM_API_SERVER || 'https://api.desk.ekalliptus.com' }}
+        run: |
+          cargo test -p base --locked
+          python3 -m unittest -v scripts/test_generate_release_manifest.py
+
+      - name: Generate release changelog
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p changelog
+          prev_tag=$(git tag --list 'v*' --sort=-v:refname | grep -Fxv "${{ steps.meta.outputs.release_tag }}" | head -n 1 || true)
+          {
+            echo "## ${{ steps.meta.outputs.release_tag }}"
+            echo ""
+            if [ -n "${prev_tag}" ]; then
+              echo "Changes since ${prev_tag}:"
+              git log "${prev_tag}..HEAD" --no-merges --pretty=format:"- %s (%h)" | head -n 50 || true
+            else
+              git log -n 20 --no-merges --pretty=format:"- %s (%h)" || true
+            fi
+            echo ""
+          } > changelog/CHANGELOG.md
+          cat changelog/CHANGELOG.md
+
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-changelog
+          path: changelog/CHANGELOG.md
+          if-no-files-found: error
+
+  verify-api:
+    name: Verify Go API (rustdesk-api)
+    needs: [preflight]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: Run Go tests and build binaries
+        working-directory: rustdesk-api
+        run: |
+          go mod tidy
+          go test -race ./...
+          go build ./...
+
+  verify-web:
+    name: Verify Web Profile (web-profile)
+    needs: [preflight]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web-profile/package-lock.json
+
+      - name: Install, test, and build Astro static portal
+        working-directory: web-profile
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+  generate-bridge:
+    needs: [preflight]
+    uses: ./.github/workflows/bridge.yml
+
+  build-topmost-window:
+    needs: [preflight]
+    if: needs.preflight.outputs.targets == 'all' || needs.preflight.outputs.targets == 'windows' || needs.preflight.outputs.targets == 'windows-android'
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    with:
+      upload-artifact: true
+      target: windows-2022
+      configuration: Release
+      platform: x64
+      target_version: Windows10
+
+  build-windows:
+    name: Build Windows x86_64 installer
+    needs: [preflight, generate-bridge, build-topmost-window]
+    if: needs.preflight.outputs.targets == 'all' || needs.preflight.outputs.targets == 'windows' || needs.preflight.outputs.targets == 'windows-android'
+    runs-on: windows-2022
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0 # v2.0.9
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install Flutter
+        id: flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      - name: Replace engine with RustDesk custom Flutter engine
+        run: |
+          $flutterRoot = "${{ steps.flutter.outputs['CACHE-PATH'] }}"
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release -Force
+          Move-Item -Force windows-x64-release/* "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\"
+
+      - name: Patch Flutter dropdown filter
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff "$(dirname "$(dirname "$(which flutter)")")"
+          cd "$(dirname "$(dirname "$(which flutter)")")"
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: windows-2022
+
+      - name: Setup vcpkg with GitHub Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        shell: bash
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Build EL-Desk Windows portable bundle
+        env:
+          CUSTOM_RENDEZVOUS_SERVER: ${{ secrets.CUSTOM_RENDEZVOUS_SERVER || vars.CUSTOM_RENDEZVOUS_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RELAY_SERVER: ${{ secrets.CUSTOM_RELAY_SERVER || vars.CUSTOM_RELAY_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RS_PUB_KEY: ${{ secrets.CUSTOM_RS_PUB_KEY }}
+          CUSTOM_API_SERVER: ${{ secrets.CUSTOM_API_SERVER || vars.CUSTOM_API_SERVER || 'https://api.desk.ekalliptus.com' }}
+        run: |
+          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          Move-Item -Force ./flutter/build/windows/x64/runner/Release ./rustdesk
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath . -Force
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
+          Move-Item -Force .\usbmmidd_v2 ./rustdesk
+
+      - name: Download WindowInjection artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: topmostwindow-artifacts-x64
+          path: ./rustdesk
+
+      - name: Pack self-extracting installer EXE
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          popd
+          mkdir -p ./dist-win
+          mv ./target/release/rustdesk-portable-packer.exe "./dist-win/el-desk-${{ needs.preflight.outputs.version }}-x86_64.exe"
+
+      - name: Upload Windows EXE artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows-x86_64
+          path: dist-win/el-desk-${{ needs.preflight.outputs.version }}-x86_64.exe
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux x86_64 deb
+    needs: [preflight, generate-bridge]
+    if: needs.preflight.outputs.targets == 'all' || needs.preflight.outputs.targets == 'linux'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /opt/ghc /usr/local/lib/android /usr/share/dotnet
+          sudo apt-get update -y
+          sudo apt-get install -y nasm
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@49819abfb41bd9b44fb781159c033dba90353a7c # v1.0
+        with:
+          swap-size-gb: 12
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-unknown-linux-gnu
+          components: "rustfmt"
+
+      - name: Save Rust toolchain version
+        run: |
+          echo "RUST_TOOLCHAIN_VERSION=$(cargo --version | awk '{print $2}')" >> "$GITHUB_ENV"
+
+      - name: Limit crate-type to cdylib for Linux Flutter package
+        run: |
+          sed -i 's/\["cdylib", "staticlib", "rlib"\]/["cdylib"]/g' Cargo.toml
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Setup vcpkg with GitHub Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          sudo apt-get install -y libva-dev
+          "$VCPKG_ROOT/vcpkg" install --triplet x64-linux --x-install-root="$VCPKG_ROOT/installed"
+
+      - uses: rustdesk-org/run-on-arch-action@d3fcfbb632b84cf7f6bc772bfaaa2c2f4f8789a8
+        name: Build EL-Desk Linux deb inside Ubuntu 18.04 container
+        env:
+          CUSTOM_RENDEZVOUS_SERVER: ${{ secrets.CUSTOM_RENDEZVOUS_SERVER || vars.CUSTOM_RENDEZVOUS_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RELAY_SERVER: ${{ secrets.CUSTOM_RELAY_SERVER || vars.CUSTOM_RELAY_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RS_PUB_KEY: ${{ secrets.CUSTOM_RS_PUB_KEY }}
+          CUSTOM_API_SERVER: ${{ secrets.CUSTOM_API_SERVER || vars.CUSTOM_API_SERVER || 'https://api.desk.ekalliptus.com' }}
+        with:
+          arch: x86_64
+          distro: ubuntu18.04
+          githubToken: ${{ github.token }}
+          dockerRunArgs: |
+            --volume "${PWD}:/workspace"
+            --volume "/opt/artifacts:/opt/artifacts"
+            -e CUSTOM_APP_NAME
+            -e CUSTOM_RENDEZVOUS_SERVER
+            -e CUSTOM_RELAY_SERVER
+            -e CUSTOM_RS_PUB_KEY
+            -e CUSTOM_API_SERVER
+            -e CUSTOM_WEB_URL
+            -e CUSTOM_UPDATE_URL
+            -e CUSTOM_HIDE_SERVER_SETTINGS
+            -e CUSTOM_HIDE_NETWORK_SETTINGS
+            -e CUSTOM_ENCRYPTED_ONLY
+          shell: /bin/bash
+          install: |
+            apt-get update -y
+            apt-get install -y \
+              build-essential clang cmake curl gcc git g++ \
+              libayatana-appindicator3-dev libasound2-dev libclang-10-dev \
+              libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgtk-3-dev \
+              libpulse-dev libva-dev libxcb-randr0-dev libxcb-shape0-dev \
+              libxcb-xfixes0-dev libxdo-dev libxfixes-dev llvm-10-dev \
+              nasm ninja-build pkg-config python3 unzip wget xz-utils libssl-dev
+            apt-get remove -y libopus-dev || true
+          run: |
+            set -euo pipefail
+            test -n "${CUSTOM_RS_PUB_KEY}" || { echo "CUSTOM_RS_PUB_KEY missing inside container"; exit 1; }
+            git config --global --add safe.directory "*"
+
+            pushd /opt
+            wget -q -O rust.tar.gz "https://static.rust-lang.org/dist/rust-${{ env.RUST_TOOLCHAIN_VERSION }}-x86_64-unknown-linux-gnu.tar.gz"
+            tar -zxf rust.tar.gz && rm rust.tar.gz
+            "rust-${{ env.RUST_TOOLCHAIN_VERSION }}-x86_64-unknown-linux-gnu/install.sh"
+            rm -rf "rust-${{ env.RUST_TOOLCHAIN_VERSION }}-x86_64-unknown-linux-gnu"
+            popd
+
+            pushd /workspace
+            export VCPKG_ROOT=/opt/artifacts/vcpkg
+            cargo build --locked --lib --features hwcodec,flutter,unix-file-copy-paste --release
+            rm -rf target/release/deps target/release/build
+
+            pushd /opt
+            wget -q "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${{ env.FLUTTER_VERSION }}-stable.tar.xz"
+            tar -xf "flutter_linux_${{ env.FLUTTER_VERSION }}-stable.tar.xz"
+            export PATH=/opt/flutter/bin:$PATH
+            flutter doctor -v
+            (cd /opt/flutter && git apply /workspace/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff)
+            popd
+
+            export CARGO_INCREMENTAL=0
+            export DEB_ARCH=amd64
+            python3 ./build.py --flutter --skip-cargo
+
+      - name: Stage Linux deb artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb_src=$(ls rustdesk-*.deb | head -n 1)
+          test -n "${deb_src}"
+          mkdir -p dist-linux appimage-input
+          cp "${deb_src}" "dist-linux/el-desk-${{ needs.preflight.outputs.version }}-x86_64.deb"
+          mv "${deb_src}" appimage-input/rustdesk.deb
+
+      - name: Upload Linux deb artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-linux-deb-x86_64
+          path: dist-linux/el-desk-${{ needs.preflight.outputs.version }}-x86_64.deb
+          if-no-files-found: error
+
+      - name: Upload intermediate deb for AppImage job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-deb-appimage-input
+          path: appimage-input/rustdesk.deb
+          if-no-files-found: error
+
+  build-linux-appimage:
+    name: Build Linux x86_64 AppImage
+    needs: [preflight, build-linux]
+    if: needs.preflight.outputs.targets == 'all' || needs.preflight.outputs.targets == 'linux'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download intermediate deb
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linux-deb-appimage-input
+          path: appimage
+
+      - name: Build AppImage package
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y libarchive-tools libfuse2
+          sudo pip3 install "setuptools_scm<10"
+          sudo pip3 install git+https://github.com/rustdesk-org/appimage-builder.git
+          pushd appimage
+          ./build-apprun.sh x86_64
+          sudo appimage-builder --skip-tests --recipe ./AppImageBuilder-x86_64.yml
+          cmp AppDir/AppRun appimage-build/AppRun/v2.0.0/AppRun-Release-x86_64
+          appimage_src=$(find . -maxdepth 1 -name '*.AppImage' | head -n 1)
+          test -n "${appimage_src}"
+          popd
+          mkdir -p dist-appimage
+          mv "appimage/${appimage_src}" "dist-appimage/el-desk-${{ needs.preflight.outputs.version }}-x86_64.AppImage"
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-linux-appimage-x86_64
+          path: dist-appimage/el-desk-${{ needs.preflight.outputs.version }}-x86_64.AppImage
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (${{ matrix.job.arch }}) DMG
+    needs: [preflight, generate-bridge]
+    if: needs.preflight.outputs.targets == 'all' || needs.preflight.outputs.targets == 'macos'
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - {
+              target: aarch64-apple-darwin,
+              os: macos-26,
+              arch: arm64,
+              vcpkg-triplet: arm64-osx,
+              extra-build-args: "--screencapturekit",
+            }
+          - {
+              target: x86_64-apple-darwin,
+              os: macos-26-intel,
+              arch: x86_64,
+              vcpkg-triplet: x64-osx,
+              extra-build-args: "",
+            }
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Detect macOS signing configuration
+        shell: bash
+        env:
+          MACOS_P12_BASE64: ${{ secrets.MACOS_P12_BASE64 }}
+          MACOS_NOTARIZE_JSON: ${{ secrets.MACOS_NOTARIZE_JSON }}
+        run: |
+          if [ -n "${MACOS_P12_BASE64}" ]; then
+            echo "HAS_MACOS_SIGNING=true" >> "$GITHUB_ENV"
+          else
+            echo "HAS_MACOS_SIGNING=false" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${MACOS_P12_BASE64}" ] && [ -n "${MACOS_NOTARIZE_JSON}" ]; then
+            echo "HAS_MACOS_NOTARIZE=true" >> "$GITHUB_ENV"
+          else
+            echo "HAS_MACOS_NOTARIZE=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Import macOS signing certificate
+        if: env.HAS_MACOS_SIGNING == 'true'
+        uses: apple-actions/import-codesign-certs@253ddeeac23f2bdad1646faac5c8c2832e800071 # v1
+        with:
+          p12-file-base64: ${{ secrets.MACOS_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_P12_PASSWORD }}
+          keychain: eldesk
+          keychain-password: ${{ secrets.MACOS_P12_PASSWORD }}
+
+      - name: Import Apple notarization API key
+        if: env.HAS_MACOS_NOTARIZE == 'true'
+        uses: timheuer/base64-to-file@adaa40c0c581f276132199d4cf60afa07ce60eac # v1.2
+        with:
+          fileName: rustdesk.json
+          fileDir: ${{ github.workspace }}
+          encodedString: ${{ secrets.MACOS_NOTARIZE_JSON }}
+
+      - name: Install rcodesign tool
+        if: env.HAS_MACOS_NOTARIZE == 'true'
+        shell: bash
+        run: |
+          pushd /tmp
+          wget -q https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-macos-universal.tar.gz
+          tar -zxf apple-codesign-0.22.0-macos-universal.tar.gz
+          sudo mv apple-codesign-0.22.0-macos-universal/rcodesign /usr/local/bin
+          popd
+
+      - name: Install macOS build tools and NASM 2.16
+        run: |
+          brew install llvm create-dmg
+          command -v pkg-config >/dev/null 2>&1 || brew install pkg-config
+          wget -q https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          unzip -q nasm-2.16.03-macosx.zip
+          sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ matrix.job.arch == 'arm64' && env.FLUTTER_MACOS_ARM_VERSION || env.FLUTTER_VERSION }}
+
+      - name: Keep CocoaPods for Flutter 3.44 (arm64)
+        if: ${{ matrix.job.arch == 'arm64' }}
+        run: flutter config --no-enable-swift-package-manager
+
+      - name: Patch Flutter dropdown filter (x86_64)
+        if: ${{ matrix.job.arch == 'x86_64' }}
+        run: |
+          cd "$(dirname "$(dirname "$(which flutter)")")"
+          git apply "${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+
+      - name: Workaround Flutter scheduler issue
+        shell: bash
+        run: |
+          cd "$(dirname "$(which flutter)")"
+          sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g' ../packages/flutter/lib/src/scheduler/binding.dart
+
+      - name: Patch RustDesk sources for Flutter 3.44 (arm64)
+        if: ${{ matrix.job.arch == 'arm64' }}
+        shell: bash
+        run: |
+          brew install gnu-sed
+          export PATH="$(brew --prefix gnu-sed)/libexec/gnubin:$PATH"
+          bash .github/patches/apply_flutter_3.44_source_patches.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.MAC_RUST_VERSION }}
+          targets: ${{ matrix.job.target }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: ${{ matrix.job.os }}
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ matrix.job.arch == 'arm64' && 'bridge-artifact-flutter-3.44' || 'bridge-artifact' }}
+          path: ./
+
+      - name: Setup vcpkg with GitHub Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Build EL-Desk macOS app
+        env:
+          CUSTOM_RENDEZVOUS_SERVER: ${{ secrets.CUSTOM_RENDEZVOUS_SERVER || vars.CUSTOM_RENDEZVOUS_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RELAY_SERVER: ${{ secrets.CUSTOM_RELAY_SERVER || vars.CUSTOM_RELAY_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RS_PUB_KEY: ${{ secrets.CUSTOM_RS_PUB_KEY }}
+          CUSTOM_API_SERVER: ${{ secrets.CUSTOM_API_SERVER || vars.CUSTOM_API_SERVER || 'https://api.desk.ekalliptus.com' }}
+        run: |
+          if [ "${{ matrix.job.target }}" = "aarch64-apple-darwin" ]; then
+            MIN_MACOS_VERSION="12.3"
+            sed -i -e "s/MACOSX_DEPLOYMENT_TARGET\=[0-9]*.[0-9]*/MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}/" build.py
+            sed -i -e "s/platform :osx, '.*'/platform :osx, '${MIN_MACOS_VERSION}'/" flutter/macos/Podfile
+            sed -i -e "s/osx_minimum_system_version = \"[0-9]*.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
+            sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
+            echo "MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}" >> "$GITHUB_ENV"
+          fi
+          ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
+
+      - name: Package signed DMG
+        if: env.HAS_MACOS_SIGNING == 'true'
+        env:
+          MACOS_P12_PASSWORD: ${{ secrets.MACOS_P12_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
+          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
+          security default-keychain -s eldesk.keychain
+          security unlock-keychain -p "${MACOS_P12_PASSWORD}" eldesk.keychain
+          bash ./.github/scripts/sign-macos-app.sh \
+            ./flutter/build/macos/Build/Products/Release/RustDesk.app \
+            "${MACOS_CODESIGN_IDENTITY}" \
+            ./flutter/macos/Runner/Release.entitlements
+          mkdir -p dist-macos
+          dmg_path="dist-macos/el-desk-${{ needs.preflight.outputs.version }}-${{ matrix.job.arch }}.dmg"
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 "${dmg_path}" ./flutter/build/macos/Build/Products/Release/RustDesk.app
+          codesign --force --options runtime -s "${MACOS_CODESIGN_IDENTITY}" --deep --strict "${dmg_path}"
+          if [ "${HAS_MACOS_NOTARIZE}" = "true" ]; then
+            rcodesign notary-submit --api-key-path "${{ github.workspace }}/rustdesk.json" --staple "${dmg_path}"
+          fi
+
+      - name: Package unsigned DMG (fallback when signing cert not configured)
+        if: env.HAS_MACOS_SIGNING != 'true'
+        run: |
+          set -euo pipefail
+          echo "::warning::MACOS_P12_BASE64 is not configured; packaging unsigned DMG"
+          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
+          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
+          mkdir -p dist-macos
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 "dist-macos/el-desk-${{ needs.preflight.outputs.version }}-${{ matrix.job.arch }}.dmg" ./flutter/build/macos/Build/Products/Release/RustDesk.app
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos-${{ matrix.job.arch }}
+          path: dist-macos/el-desk-${{ needs.preflight.outputs.version }}-${{ matrix.job.arch }}.dmg
+          if-no-files-found: error
+
+  build-android:
+    name: Build Android arm64-v8a APK
+    needs: [preflight, generate-bridge]
+    if: needs.preflight.outputs.targets == 'all' || needs.preflight.outputs.targets == 'android' || needs.preflight.outputs.targets == 'windows-android'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install Android Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake curl git g++ libclang-dev llvm-dev \
+            nasm ninja-build openjdk-17-jdk-headless pkg-config wget
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Check JNI natives are in ffi.FFI
+        shell: bash
+        run: |
+          bad=0
+          grep -rnE --include='*.rs' 'fn Java_' src libs | grep -v 'fn Java_ffi_FFI_' && bad=1
+          grep -rl --include='*.kt' 'external fun' flutter/android | grep -vx 'flutter/android/app/src/main/kotlin/ffi.kt' && bad=1
+          grep -rn --include='*.rs' 'com/carriez' src libs && bad=1
+          if [ "$bad" = 1 ]; then
+            echo "::error::Android JNI exports violated ffi.FFI rules"
+            exit 1
+          fi
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.ANDROID_FLUTTER_VERSION }}
+
+      - name: Patch Flutter dropdown filter
+        run: |
+          cd "$(dirname "$(dirname "$(which flutter)")")"
+          git apply "${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+
+      - uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: true
+
+      - name: Setup vcpkg with GitHub Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install Android vcpkg dependencies
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: ./flutter/build_android_deps.sh arm64-v8a
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-linux-android
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: android-arm64
+
+      - name: Build Rust Android shared library
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          CUSTOM_RENDEZVOUS_SERVER: ${{ secrets.CUSTOM_RENDEZVOUS_SERVER || vars.CUSTOM_RENDEZVOUS_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RELAY_SERVER: ${{ secrets.CUSTOM_RELAY_SERVER || vars.CUSTOM_RELAY_SERVER || 'relay.desk.ekalliptus.com' }}
+          CUSTOM_RS_PUB_KEY: ${{ secrets.CUSTOM_RS_PUB_KEY }}
+          CUSTOM_API_SERVER: ${{ secrets.CUSTOM_API_SERVER || vars.CUSTOM_API_SERVER || 'https://api.desk.ekalliptus.com' }}
+        run: |
+          cargo install cargo-ndk --version "${{ env.CARGO_NDK_VERSION }}" --locked
+          ./flutter/ndk_arm64.sh
+          mkdir -p ./flutter/android/app/src/main/jniLibs/arm64-v8a
+          cp "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" ./flutter/android/app/src/main/jniLibs/arm64-v8a/
+          cp ./target/aarch64-linux-android/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
+
+      - name: Detect Android signing configuration
+        shell: bash
+        env:
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+        run: |
+          if [ -n "${ANDROID_SIGNING_KEY}" ]; then
+            echo "HAS_ANDROID_SIGNING=true" >> "$GITHUB_ENV"
+          else
+            echo "HAS_ANDROID_SIGNING=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build Android APK
+        shell: bash
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+        run: |
+          set -euo pipefail
+          export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          sed -i "s/signingConfigs.release/signingConfigs.debug/g" ./flutter/android/app/build.gradle
+          pushd flutter
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
+          popd
+          mkdir -p signed-apk
+          mv flutter/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "signed-apk/el-desk-${{ needs.preflight.outputs.version }}-arm64-v8a.apk"
+          BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
+          echo "ANDROID_SIGN_TOOL_VERSION=${BUILD_TOOL_VERSION}" >> "$GITHUB_ENV"
+
+      - uses: r0adkll/sign-android-release@349ebdef58775b1e0d8099458af0816dc79b6407 # v1
+        name: Sign release APK
+        if: env.HAS_ANDROID_SIGNING == 'true'
+        id: sign-rustdesk
+        with:
+          releaseDirectory: ./signed-apk
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
+
+      - name: Stage final APK
+        shell: bash
+        env:
+          SIGNED_APK_PATH: ${{ steps.sign-rustdesk.outputs.signedReleaseFile }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-android
+          if [ -n "${SIGNED_APK_PATH}" ] && [ -f "${SIGNED_APK_PATH}" ]; then
+            mv "${SIGNED_APK_PATH}" "dist-android/el-desk-${{ needs.preflight.outputs.version }}-arm64-v8a.apk"
+          else
+            echo "::warning::ANDROID_SIGNING_KEY is not set; staging debug-signed APK"
+            mv "signed-apk/el-desk-${{ needs.preflight.outputs.version }}-arm64-v8a.apk" "dist-android/el-desk-${{ needs.preflight.outputs.version }}-arm64-v8a.apk"
+          fi
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-android-arm64-v8a
+          path: dist-android/el-desk-${{ needs.preflight.outputs.version }}-arm64-v8a.apk
+          if-no-files-found: error
+
+  publish-r2:
+    name: Generate checksums & publish to Cloudflare R2
+    needs:
+      - preflight
+      - verify-api
+      - verify-web
+      - build-windows
+      - build-linux
+      - build-linux-appimage
+      - build-macos
+      - build-android
+    if: |
+      always() &&
+      !cancelled() &&
+      needs.preflight.result == 'success' &&
+      needs.verify-api.result == 'success' &&
+      needs.verify-web.result == 'success' &&
+      contains(fromJSON('["success","skipped"]'), needs.build-windows.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build-linux.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build-linux-appimage.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build-macos.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build-android.result) &&
+      (
+        needs.build-windows.result == 'success' ||
+        needs.build-linux.result == 'success' ||
+        needs.build-linux-appimage.result == 'success' ||
+        needs.build-macos.result == 'success' ||
+        needs.build-android.result == 'success'
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository tools
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download release binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: ./downloaded
+          merge-multiple: true
+
+      - name: Organize binaries and generate latest.json + SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist changelog
+          if [ -f downloaded/CHANGELOG.md ]; then
+            mv downloaded/CHANGELOG.md changelog/CHANGELOG.md
+          else
+            printf '## %s\n' "${{ needs.preflight.outputs.release_tag }}" > changelog/CHANGELOG.md
+          fi
+          find downloaded -maxdepth 2 -type f -exec mv -t dist/ {} +
+          ls -lh dist/
+          python3 scripts/generate-release-manifest.py \
+            --dist-dir dist \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --release-id "${{ needs.preflight.outputs.release_tag }}" \
+            --r2-base-url "${{ env.CUSTOM_R2_URL }}" \
+            --web-url "${{ env.CUSTOM_WEB_URL }}/#downloads" \
+            --changelog-file changelog/CHANGELOG.md
+          cat dist/latest.json
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload release artifacts and latest.json to Cloudflare R2
+        if: needs.preflight.outputs.publish_r2 == 'true'
+        shell: bash
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          if ! command -v aws >/dev/null 2>&1; then
+            curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+            unzip -q /tmp/awscliv2.zip -d /tmp
+            sudo /tmp/aws/install
+          fi
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          release_tag="${{ needs.preflight.outputs.release_tag }}"
+          for f in dist/*; do
+            base=$(basename "${f}")
+            [ "${base}" = "latest.json" ] && continue
+            aws s3 cp "${f}" "s3://${R2_BUCKET_NAME}/releases/${release_tag}/${base}" \
+              --endpoint-url "${endpoint}" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+          aws s3 cp dist/latest.json "s3://${R2_BUCKET_NAME}/latest.json" \
+            --endpoint-url "${endpoint}" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=60"
+
+      - name: Upload combined release bundle artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: el-desk-release-bundle
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publish GitHub Release metadata and checksums
+        if: needs.preflight.outputs.publish_r2 == 'true'
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        with:
+          tag_name: ${{ needs.preflight.outputs.release_tag }}
+          name: EL-Desk ${{ needs.preflight.outputs.release_tag }}
+          body_path: changelog/CHANGELOG.md
+          files: |
+            dist/SHA256SUMS.txt
+            dist/latest.json

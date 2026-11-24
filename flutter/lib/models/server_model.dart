@@ -478,6 +478,9 @@ class ServerModel with ChangeNotifier {
         _mediaOk = value;
         if (value && !_isStart) {
           startService();
+        } else if (!value && _isStart) {
+          _isStart = false;
+          WakelockManager.disable(_wakelockKey);
         }
         break;
       case "input":

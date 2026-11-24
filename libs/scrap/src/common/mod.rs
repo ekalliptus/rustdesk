@@ -432,23 +432,72 @@ pub trait GoogleImage {
     fn stride(&self) -> Vec<i32>;
     fn planes(&self) -> Vec<*mut u8>;
     fn chroma(&self) -> Chroma;
-    fn get_bytes_per_row(w: usize, fmt: ImageFormat, align: usize) -> usize {
+    fn checked_bytes_per_row(w: usize, fmt: ImageFormat, align: usize) -> Option<usize> {
         let bytes_per_pixel = match fmt {
-            ImageFormat::Raw => 3,
-            ImageFormat::ARGB | ImageFormat::ABGR => 4,
+            ImageFormat::Raw => 3usize,
+            ImageFormat::ARGB | ImageFormat::ABGR => 4usize,
         };
-        // https://github.com/lemenkov/libyuv/blob/6900494d90ae095d44405cd4cc3f346971fa69c9/source/convert_argb.cc#L128
-        // https://github.com/lemenkov/libyuv/blob/6900494d90ae095d44405cd4cc3f346971fa69c9/source/convert_argb.cc#L129
-        (w * bytes_per_pixel + align - 1) & !(align - 1)
+        let align = align.max(1);
+        let raw = w.checked_mul(bytes_per_pixel)?;
+        let padded = raw.checked_add(align - 1)?;
+        Some(if align.is_power_of_two() {
+            padded & !(align - 1)
+        } else {
+            (padded / align).checked_mul(align)?
+        })
+    }
+    fn get_bytes_per_row(w: usize, fmt: ImageFormat, align: usize) -> usize {
+        Self::checked_bytes_per_row(w, fmt, align).unwrap_or(0)
     }
     // rgb [in/out] fmt and stride must be set in ImageRgb
     fn to(&self, rgb: &mut ImageRgb) {
-        rgb.w = self.width();
-        rgb.h = self.height();
-        let bytes_per_row = Self::get_bytes_per_row(rgb.w, rgb.fmt, rgb.align());
-        rgb.raw.resize(rgb.h * bytes_per_row, 0);
+        const MAX_FRAME_DIM: usize = 16384;
+        let w = self.width();
+        let h = self.height();
         let stride = self.stride();
         let planes = self.planes();
+        if w == 0
+            || h == 0
+            || w > MAX_FRAME_DIM
+            || h > MAX_FRAME_DIM
+            || planes.len() < 3
+            || planes[..3].iter().any(|p| p.is_null())
+            || stride.len() < 3
+            || stride[..3].iter().any(|&s| s <= 0)
+        {
+            log::error!("Invalid decoded frame dimensions/planes: {}x{}", w, h);
+            rgb.w = 0;
+            rgb.h = 0;
+            rgb.raw.clear();
+            return;
+        }
+        let Some(bytes_per_row) = Self::checked_bytes_per_row(w, rgb.fmt, rgb.align()) else {
+            log::error!("Frame bytes_per_row overflow: {}x{}", w, h);
+            rgb.w = 0;
+            rgb.h = 0;
+            rgb.raw.clear();
+            return;
+        };
+        let Some(total) = h.checked_mul(bytes_per_row) else {
+            log::error!("Frame buffer size overflow: {}x{}", w, h);
+            rgb.w = 0;
+            rgb.h = 0;
+            rgb.raw.clear();
+            return;
+        };
+        if std::os::raw::c_int::try_from(bytes_per_row).is_err()
+            || std::os::raw::c_int::try_from(w).is_err()
+            || std::os::raw::c_int::try_from(h).is_err()
+        {
+            log::error!("Frame dimensions exceed c_int: {}x{}", w, h);
+            rgb.w = 0;
+            rgb.h = 0;
+            rgb.raw.clear();
+            return;
+        }
+        rgb.w = w;
+        rgb.h = h;
+        rgb.raw.resize(total, 0);
         unsafe {
             match (self.chroma(), rgb.fmt()) {
                 (Chroma::I420, ImageFormat::Raw) => {
@@ -527,15 +576,40 @@ pub trait GoogleImage {
         }
     }
     fn data(&self) -> (&[u8], &[u8], &[u8]) {
+        const MAX_FRAME_DIM: usize = 16384;
+        let w = self.width();
+        let h_raw = self.height();
+        let stride = self.stride();
+        let planes = self.planes();
+        if w == 0
+            || h_raw == 0
+            || w > MAX_FRAME_DIM
+            || h_raw > MAX_FRAME_DIM
+            || planes.len() < 3
+            || planes[..3].iter().any(|p| p.is_null())
+            || stride.len() < 3
+            || stride[..3].iter().any(|&s| s <= 0)
+        {
+            return (&[], &[], &[]);
+        }
+        let Some(h) = h_raw.checked_add(1).map(|v| v & !1) else {
+            return (&[], &[], &[]);
+        };
+        let uv_h = match self.chroma() {
+            Chroma::I444 => h,
+            _ => h >> 1,
+        };
+        let (Some(ny), Some(nu), Some(nv)) = (
+            (stride[0] as usize).checked_mul(h),
+            (stride[1] as usize).checked_mul(uv_h),
+            (stride[2] as usize).checked_mul(uv_h),
+        ) else {
+            return (&[], &[], &[]);
+        };
         unsafe {
-            let stride = self.stride();
-            let planes = self.planes();
-            let h = (self.height() as usize + 1) & !1;
-            let n = stride[0] as usize * h;
-            let y = slice::from_raw_parts(planes[0], n);
-            let n = stride[1] as usize * (h >> 1);
-            let u = slice::from_raw_parts(planes[1], n);
-            let v = slice::from_raw_parts(planes[2], n);
+            let y = slice::from_raw_parts(planes[0], ny);
+            let u = slice::from_raw_parts(planes[1], nu);
+            let v = slice::from_raw_parts(planes[2], nv);
             (y, u, v)
         }
     }

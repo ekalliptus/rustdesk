@@ -1,0 +1,38 @@
+services:
+  hbbs:
+    image: rustdesk/rustdesk-server:latest
+    container_name: eldesk-hbbs
+    command: hbbs -r relay.desk.ekalliptus.com:21117 -k _
+    network_mode: host
+    volumes:
+      - ./data/hbbs:/root
+    restart: unless-stopped
+    mem_limit: 128m
+
+  hbbr:
+    image: rustdesk/rustdesk-server:latest
+    container_name: eldesk-hbbr
+    command: hbbr -k _
+    network_mode: host
+    volumes:
+      - ./data/hbbs:/root
+    restart: unless-stopped
+    mem_limit: 128m
+
+  rustdesk-api:
+    build:
+      context: ../rustdesk-api
+      dockerfile: Dockerfile
+    container_name: eldesk-api
+    ports:
+      - "127.0.0.1:21114:21114"
+    env_file:
+      - .env
+    restart: unless-stopped
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:21114/healthz || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

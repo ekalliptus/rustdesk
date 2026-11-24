@@ -92,14 +92,16 @@ class InputService : AccessibilityService() {
     }
 
     private val logTag = "input service"
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var leftIsDown = false
     private var touchPath = Path()
     private var stroke: GestureDescription.StrokeDescription? = null
     private var lastTouchGestureStartTime = 0L
     private var mouseX = 0
     private var mouseY = 0
-    private var timer = Timer()
-    private var recentActionTask: TimerTask? = null
+    private var longPressRunnable: Runnable? = null
+    private var recentActionRunnable: Runnable? = null
+    private var wheelPollRunnable: Runnable? = null
     // 100(tap timeout) + 400(long press timeout)
     private val longPressDuration = ViewConfiguration.getTapTimeout().toLong() + ViewConfiguration.getLongPressTimeout().toLong()
 
@@ -122,34 +124,47 @@ class InputService : AccessibilityService() {
      */
     @RequiresApi(Build.VERSION_CODES.N)
     fun onMouseInput(mask: Int, _x: Int, _y: Int) {
+        mainHandler.post {
+            handleMouseInput(mask, _x, _y)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun handleMouseInput(mask: Int, _x: Int, _y: Int) {
+        val screen = SCREEN_INFO
+        val maxX = max(0, screen.width * screen.scale - 1)
+        val maxY = max(0, screen.height * screen.scale - 1)
         val x = max(0, _x)
         val y = max(0, _y)
 
         if (mask == 0 || mask == LEFT_MOVE) {
             val oldX = mouseX
             val oldY = mouseY
-            mouseX = x * SCREEN_INFO.scale
-            mouseY = y * SCREEN_INFO.scale
+            mouseX = (x * screen.scale).coerceIn(0, maxX)
+            mouseY = (y * screen.scale).coerceIn(0, maxY)
             if (isWaitingLongPress) {
                 val delta = abs(oldX - mouseX) + abs(oldY - mouseY)
-                Log.d(logTag,"delta:$delta")
                 if (delta > 8) {
                     isWaitingLongPress = false
+                    longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                    longPressRunnable = null
                 }
             }
         }
 
         // left button down, was up
         if (mask == LEFT_DOWN) {
+            longPressRunnable?.let { mainHandler.removeCallbacks(it) }
             isWaitingLongPress = true
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    if (isWaitingLongPress) {
-                        isWaitingLongPress = false
-                        continueGesture(mouseX, mouseY)
-                    }
+            val runnable = Runnable {
+                longPressRunnable = null
+                if (isWaitingLongPress) {
+                    isWaitingLongPress = false
+                    continueGesture(mouseX, mouseY)
                 }
-            }, longPressDuration)
+            }
+            longPressRunnable = runnable
+            mainHandler.postDelayed(runnable, longPressDuration)
 
             leftIsDown = true
             startGesture(mouseX, mouseY)
@@ -166,6 +181,8 @@ class InputService : AccessibilityService() {
             if (leftIsDown) {
                 leftIsDown = false
                 isWaitingLongPress = false
+                longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                longPressRunnable = null
                 endGesture(mouseX, mouseY)
                 return
             }
@@ -183,20 +200,21 @@ class InputService : AccessibilityService() {
 
         // long WHEEL_BUTTON_DOWN -> GLOBAL_ACTION_RECENTS
         if (mask == WHEEL_BUTTON_DOWN) {
-            timer.purge()
-            recentActionTask = object : TimerTask() {
-                override fun run() {
-                    performGlobalAction(GLOBAL_ACTION_RECENTS)
-                    recentActionTask = null
-                }
+            recentActionRunnable?.let { mainHandler.removeCallbacks(it) }
+            val runnable = Runnable {
+                performGlobalAction(GLOBAL_ACTION_RECENTS)
+                recentActionRunnable = null
             }
-            timer.schedule(recentActionTask, LONG_TAP_DELAY)
+            recentActionRunnable = runnable
+            mainHandler.postDelayed(runnable, LONG_TAP_DELAY)
         }
 
         // wheel button up
         if (mask == WHEEL_BUTTON_UP) {
-            if (recentActionTask != null) {
-                recentActionTask!!.cancel()
+            val runnable = recentActionRunnable
+            if (runnable != null) {
+                mainHandler.removeCallbacks(runnable)
+                recentActionRunnable = null
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
             return
@@ -215,13 +233,14 @@ class InputService : AccessibilityService() {
             if (_y == 0) {
                 return
             }
-            if (mouseY < MOUSE_WHEEL_STEP) {
+            val deltaY = if (_y < 0) -MOUSE_WHEEL_STEP else MOUSE_WHEEL_STEP
+            val targetY = (mouseY + deltaY).coerceIn(0, maxY)
+            if (targetY == mouseY) {
                 return
             }
             val path = Path()
             path.moveTo(mouseX.toFloat(), mouseY.toFloat())
-            val deltaY = if (_y < 0) -MOUSE_WHEEL_STEP else MOUSE_WHEEL_STEP
-            path.lineTo(mouseX.toFloat(), (mouseY + deltaY).toFloat())
+            path.lineTo(mouseX.toFloat(), targetY.toFloat())
             val stroke = GestureDescription.StrokeDescription(
                 path,
                 0,
@@ -235,12 +254,13 @@ class InputService : AccessibilityService() {
         }
 
         if (mask == WHEEL_DOWN) {
-            if (mouseY < WHEEL_STEP) {
+            val targetY = (mouseY - WHEEL_STEP).coerceIn(0, maxY)
+            if (targetY == mouseY) {
                 return
             }
             val path = Path()
             path.moveTo(mouseX.toFloat(), mouseY.toFloat())
-            path.lineTo(mouseX.toFloat(), (mouseY - WHEEL_STEP).toFloat())
+            path.lineTo(mouseX.toFloat(), targetY.toFloat())
             val stroke = GestureDescription.StrokeDescription(
                 path,
                 0,
@@ -250,16 +270,16 @@ class InputService : AccessibilityService() {
             builder.addStroke(stroke)
             wheelActionsQueue.offer(builder.build())
             consumeWheelActions()
-
         }
 
         if (mask == WHEEL_UP) {
-            if (mouseY < WHEEL_STEP) {
+            val targetY = (mouseY + WHEEL_STEP).coerceIn(0, maxY)
+            if (targetY == mouseY) {
                 return
             }
             val path = Path()
             path.moveTo(mouseX.toFloat(), mouseY.toFloat())
-            path.lineTo(mouseX.toFloat(), (mouseY + WHEEL_STEP).toFloat())
+            path.lineTo(mouseX.toFloat(), targetY.toFloat())
             val stroke = GestureDescription.StrokeDescription(
                 path,
                 0,
@@ -274,23 +294,31 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onTouchInput(mask: Int, _x: Int, _y: Int) {
+        mainHandler.post {
+            handleTouchInput(mask, _x, _y)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun handleTouchInput(mask: Int, _x: Int, _y: Int) {
+        val screen = SCREEN_INFO
+        val maxX = max(0, screen.width * screen.scale - 1)
+        val maxY = max(0, screen.height * screen.scale - 1)
         when (mask) {
             TOUCH_PAN_UPDATE -> {
-                mouseX -= _x * SCREEN_INFO.scale
-                mouseY -= _y * SCREEN_INFO.scale
-                mouseX = max(0, mouseX);
-                mouseY = max(0, mouseY);
+                mouseX = (mouseX - _x * screen.scale).coerceIn(0, maxX)
+                mouseY = (mouseY - _y * screen.scale).coerceIn(0, maxY)
                 continueGesture(mouseX, mouseY)
             }
             TOUCH_PAN_START -> {
-                mouseX = max(0, _x) * SCREEN_INFO.scale
-                mouseY = max(0, _y) * SCREEN_INFO.scale
+                mouseX = (max(0, _x) * screen.scale).coerceIn(0, maxX)
+                mouseY = (max(0, _y) * screen.scale).coerceIn(0, maxY)
                 startGesture(mouseX, mouseY)
             }
             TOUCH_PAN_END -> {
                 endGesture(mouseX, mouseY)
-                mouseX = max(0, _x) * SCREEN_INFO.scale
-                mouseY = max(0, _y) * SCREEN_INFO.scale
+                mouseX = (max(0, _x) * screen.scale).coerceIn(0, maxX)
+                mouseY = (max(0, _y) * screen.scale).coerceIn(0, maxY)
             }
             else -> {}
         }
@@ -305,13 +333,14 @@ class InputService : AccessibilityService() {
         }
         wheelActionsQueue.poll()?.let {
             dispatchGesture(it, null, null)
-            timer.purge()
-            timer.schedule(object : TimerTask() {
-                override fun run() {
-                    isWheelActionsPolling = false
-                    consumeWheelActions()
-                }
-            }, WHEEL_DURATION + 10)
+            wheelPollRunnable?.let { r -> mainHandler.removeCallbacks(r) }
+            val runnable = Runnable {
+                wheelPollRunnable = null
+                isWheelActionsPolling = false
+                consumeWheelActions()
+            }
+            wheelPollRunnable = runnable
+            mainHandler.postDelayed(runnable, WHEEL_DURATION + 10)
         } ?: let {
             isWheelActionsPolling = false
             return
@@ -445,7 +474,12 @@ class InputService : AccessibilityService() {
 
     @RequiresApi(Build.VERSION_CODES.N)
     fun onKeyEvent(data: ByteArray) {
-        val keyEvent = KeyEvent.parseFrom(data)
+        val keyEvent = try {
+            KeyEvent.parseFrom(data)
+        } catch (e: Exception) {
+            Log.w(logTag, "Invalid key event payload: ${e.message}")
+            return
+        }
         val keyboardMode = keyEvent.getMode()
 
         var textToCommit: String? = null
@@ -465,8 +499,6 @@ class InputService : AccessibilityService() {
         } else if (keyboardMode == KeyboardMode.Translate) {
         } else {
         }
-
-        Log.d(logTag, "onKeyEvent $keyEvent textToCommit:$textToCommit")
 
         var ke: KeyEventAndroid? = null
         if (Build.VERSION.SDK_INT < 33 || textToCommit == null) {
@@ -681,8 +713,6 @@ class InputService : AccessibilityService() {
 
         var success = false
 
-        Log.d(logTag, "existing text:$text textToCommit:$textToCommit textSelectionStart:$textSelectionStart textSelectionEnd:$textSelectionEnd")
-
         if (textToCommit != null) {
             if ((textSelectionStart == -1) || (textSelectionEnd == -1)) {
                 val newText = textToCommit
@@ -794,8 +824,21 @@ class InputService : AccessibilityService() {
         Log.d(logTag, "onServiceConnected!")
     }
 
+    private fun resetInputState() {
+        mainHandler.removeCallbacksAndMessages(null)
+        longPressRunnable = null
+        recentActionRunnable = null
+        wheelPollRunnable = null
+        wheelActionsQueue.clear()
+        isWheelActionsPolling = false
+        isWaitingLongPress = false
+        leftIsDown = false
+        stroke = null
+    }
+
     override fun onDestroy() {
         ctx = null
+        resetInputState()
         // Keep this fallback even though onUnbind usually notifies first.
         notifyInputState()
         super.onDestroy()
@@ -803,6 +846,7 @@ class InputService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         ctx = null
+        resetInputState()
         notifyInputState()
         return super.onUnbind(intent)
     }

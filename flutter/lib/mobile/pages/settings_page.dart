@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common/eldesk_config.dart';
 import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:get/get.dart';
@@ -38,7 +39,7 @@ class SettingsPage extends StatefulWidget implements PageShape {
   State<SettingsPage> createState() => _SettingsState();
 }
 
-const url = 'https://rustdesk.com/';
+const url = kElDeskWebUrl;
 
 enum KeepScreenOn {
   never,
@@ -136,11 +137,9 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
         bind.mainGetOptionSync(key: kOptionAllowAutoDisconnect));
     _autoDisconnectTimeout =
         bind.mainGetOptionSync(key: kOptionAutoDisconnectTimeout);
-    _hideServer =
-        bind.mainGetBuildinOption(key: kOptionHideServerSetting) == 'Y';
+    _hideServer = elDeskHideServerSettings();
     _hideProxy = bind.mainGetBuildinOption(key: kOptionHideProxySetting) == 'Y';
-    _hideNetwork =
-        bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) == 'Y';
+    _hideNetwork = elDeskHideNetworkSettings();
     _hideWebSocket =
         bind.mainGetBuildinOption(key: kOptionHideWebSocketSetting) == 'Y' ||
             isWeb;
@@ -805,7 +804,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                       });
                     },
             ),
-          if (!_isUsingPublicServer)
+          if (!_isUsingPublicServer &&
+              !isOptionFixed(kOptionAllowInsecureTLSFallback))
             SettingsTile.switchTile(
               title: Text(translate('Allow insecure TLS fallback')),
               initialValue: _allowInsecureTlsFallback,
@@ -1066,7 +1066,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 title: Text('${translate('Version')}: $version'),
                 value: Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('rustdesk.com',
+                  child: Text(kElDeskWebHost,
                       style: TextStyle(
                         decoration: TextDecoration.underline,
                       )),
@@ -1098,8 +1098,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
                 leading: Icon(Icons.perm_identity)),
             SettingsTile(
               title: Text(translate("Privacy Statement")),
-              onPressed: (context) =>
-                  launchUrlString('https://rustdesk.com/privacy.html'),
+              onPressed: (context) => launchUrlString(kElDeskPrivacyUrl),
               leading: Icon(Icons.privacy_tip),
             )
           ],
@@ -1207,17 +1206,17 @@ void showThemeSettings(OverlayDialogManager dialogManager) async {
 void showAbout(OverlayDialogManager dialogManager) {
   dialogManager.show((setState, close, context) {
     return CustomAlertDialog(
-      title: Text(translate('About RustDesk')),
+      title: Text('${translate('About')} $kElDeskAppName'),
       content: Wrap(direction: Axis.vertical, spacing: 12, children: [
         Text('Version: $version'),
         InkWell(
             onTap: () async {
-              const url = 'https://rustdesk.com/';
+              const url = kElDeskWebUrl;
               await launchUrl(Uri.parse(url));
             },
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('rustdesk.com',
+              child: Text(kElDeskWebHost,
                   style: TextStyle(
                     decoration: TextDecoration.underline,
                   )),

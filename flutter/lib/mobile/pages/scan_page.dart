@@ -8,6 +8,7 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:zxing2/qrcode.dart';
 
 import '../../common.dart';
+import '../../common/eldesk_config.dart';
 import '../../models/platform_model.dart';
 import '../widgets/dialog.dart';
 
@@ -149,6 +150,10 @@ class _ScanPageState extends State<ScanPage> {
   void showServerSettingFromQr(String data) async {
     closeConnection();
     await controller?.pauseCamera();
+    if (elDeskHideServerSettings()) {
+      showToast('Server settings are locked');
+      return;
+    }
     if (!data.startsWith('config=')) {
       showToast('Invalid QR code');
       return;

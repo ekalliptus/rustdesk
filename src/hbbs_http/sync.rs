@@ -75,7 +75,7 @@ impl InfoUploaded {
         Self {
             uploaded: true,
             url,
-            last_uploaded: None,
+            last_uploaded: Some(Instant::now()),
             id,
             username: Some(username),
         }
@@ -107,6 +107,7 @@ async fn start_hbbs_sync_async() {
                 let conns = Connection::alive_conns();
                 if info_uploaded.uploaded && (url != info_uploaded.url || id != info_uploaded.id) {
                     info_uploaded.uploaded = false;
+                    info_uploaded.last_uploaded = None;
                     *PRO.lock().unwrap() = false;
                 }
                 // For Windows:
@@ -123,13 +124,18 @@ async fn start_hbbs_sync_async() {
                 // so it may be able to get the username before login.
                 // But strangely, sometimes we can get the username before login,
                 // we may not be able to get the username before login after the next restart.
-                let mut v = crate::get_sysinfo();
-                let sys_username = v["username"].as_str().unwrap_or_default().to_string();
-                // Though the username comparison is only necessary on Windows,
-                // we still keep the comparison on other platforms for consistency.
-                let need_upload = (!info_uploaded.uploaded || info_uploaded.username.as_ref() != Some(&sys_username)) &&
-                    info_uploaded.last_uploaded.map(|x| x.elapsed() >= UPLOAD_SYSINFO_TIMEOUT).unwrap_or(true);
-                if need_upload {
+                let retry_elapsed = info_uploaded
+                    .last_uploaded
+                    .map(|x| x.elapsed() >= UPLOAD_SYSINFO_TIMEOUT)
+                    .unwrap_or(true);
+                if retry_elapsed {
+                    if let Ok(mut v) = tokio::task::spawn_blocking(crate::get_sysinfo).await {
+                        let sys_username = v["username"].as_str().unwrap_or_default().to_string();
+                        // Though the username comparison is only necessary on Windows,
+                        // we still keep the comparison on other platforms for consistency.
+                        let need_upload = !info_uploaded.uploaded
+                            || info_uploaded.username.as_ref() != Some(&sys_username);
+                        if need_upload {
                     v["version"] = json!(crate::VERSION);
                     v["id"] = json!(id);
                     v["uuid"] = json!(crate::encode64(hbb_common::get_uuid()));
@@ -224,6 +230,12 @@ async fn start_hbbs_sync_async() {
                             info_uploaded.last_uploaded = Some(Instant::now());
                         }
                     }
+                        } else {
+                            info_uploaded.last_uploaded = Some(Instant::now());
+                        }
+                    } else {
+                        info_uploaded.last_uploaded = Some(Instant::now());
+                    }
                 }
                 if conns.is_empty() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
                     continue;
@@ -246,6 +258,7 @@ async fn start_hbbs_sync_async() {
                     if let Ok(mut rsp) = serde_json::from_str::<HashMap::<&str, Value>>(&s) {
                         if rsp.remove("sysinfo").is_some() {
                             info_uploaded.uploaded = false;
+                            info_uploaded.last_uploaded = None;
                             config::Status::set("sysinfo_hash", "".to_owned());
                             log::info!("sysinfo required to forcely update");
                         }

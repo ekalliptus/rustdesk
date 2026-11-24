@@ -1,0 +1,14 @@
+# Optional fast local build overrides for laptops with sccache + lld-link / mold.
+# Usage: cargo build --config .cargo/config.fast.toml
+# See docs/LOCAL_BUILD.md for tool installation and vcpkg binary cache setup.
+
+[build]
+rustc-wrapper = "sccache"
+
+[target.x86_64-pc-windows-msvc]
+linker = "lld-link.exe"
+rustflags = ["-Ctarget-feature=+crt-static"]
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
