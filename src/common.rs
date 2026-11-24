@@ -1770,7 +1770,7 @@ async fn post_request_(
     body: String,
     header: &str,
     tls_type: Option<TlsType>,
-    _danger_accept_invalid_cert: Option<bool>,
+    danger_accept_invalid_cert: Option<bool>,
     _original_danger_accept_invalid_cert: Option<bool>,
 ) -> ResultType<reqwest::Response> {
     let mut req = create_http_client_async(tls_type.unwrap_or(TlsType::Rustls), false).post(url);
@@ -1838,7 +1838,7 @@ async fn get_http_response_async(
     body: Option<String>,
     header: &str,
     tls_type: Option<TlsType>,
-    _danger_accept_invalid_cert: Option<bool>,
+    danger_accept_invalid_cert: Option<bool>,
     _original_danger_accept_invalid_cert: Option<bool>,
 ) -> ResultType<reqwest::Response> {
     let http_client = create_http_client_async(tls_type.unwrap_or(TlsType::Rustls), false);

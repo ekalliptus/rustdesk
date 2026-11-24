@@ -1,7 +1,7 @@
 pub use self::vpxcodec::*;
 use base::message_proto::{video_frame, Chroma, VideoFrame};
 use hbb_common::{bail, log, ResultType};
-use std::{ffi::c_void, slice};
+use std::{convert::TryFrom, ffi::c_void, slice};
 
 cfg_if! {
     if #[cfg(quartz)] {

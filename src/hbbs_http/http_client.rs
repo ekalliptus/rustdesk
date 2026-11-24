@@ -4,7 +4,10 @@ use hbb_common::{
     config::{Config, Socks5Server},
     log::{self, info},
     proxy::{Proxy, ProxyScheme},
-    tls::{get_cached_tls_type, is_plain, upsert_tls_cache, TlsType},
+    tls::{
+        get_cached_tls_accept_invalid_cert, get_cached_tls_type, is_plain, upsert_tls_cache,
+        TlsType,
+    },
     ResultType,
 };
 use reqwest::{blocking::Client as SyncClient, Client as AsyncClient};
