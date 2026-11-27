@@ -1,48 +1,89 @@
 @import "tailwindcss";
-@import "@fontsource/ibm-plex-sans/400.css";
-@import "@fontsource/ibm-plex-sans/500.css";
-@import "@fontsource/ibm-plex-sans/600.css";
-@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/600.css";
+@import "@fontsource/plus-jakarta-sans/700.css";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/instrument-serif/400-italic.css";
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
 
 @theme {
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 :root,
 [data-theme="light"] {
-  --bg: #F8F7F4;
+  --bg: #F4F7FA;
   --surface: #FFFFFF;
-  --surface-subtle: #EFECE6;
-  --border: #D6D1C7;
-  --border-strong: #7A746A;
-  --text: #1A1917;
-  --text-muted: #524E47;
-  --accent: #0F5C4C;
-  --accent-hover: #0B463A;
+  --surface-subtle: #E9EFF5;
+  --header-bg: rgba(255, 255, 255, 0.88);
+  --border: #D2DCE6;
+  --border-strong: #62758A;
+  --text: #12263A;
+  --text-muted: #46596D;
+  --primary: #1F4BC1;
+  --primary-hover: #183C9E;
+  --primary-fg: #FFFFFF;
+  --primary-subtle: #EAF0FD;
+  --accent: #147B6D;
+  --accent-text: #0F6156;
+  --accent-hover: #0E6256;
   --accent-fg: #FFFFFF;
-  --accent-subtle: #E6F2EE;
-  --danger: #A62626;
-  --danger-subtle: #FDF2F2;
+  --accent-subtle: #E6F5F1;
+  --danger: #B42318;
+  --danger-subtle: #FEF3F2;
+  --inv-bg: #12263A;
+  --inv-surface: #1A334D;
+  --inv-border: #2C4A68;
+  --inv-text: #F2F6FA;
+  --inv-text-muted: #B6C7D9;
+  --inv-accent: #73D2BE;
+  --inv-primary: #88B2FC;
+  --nav-shadow: 0 12px 32px -12px rgba(18, 38, 58, 0.14), 0 2px 6px -2px rgba(18, 38, 58, 0.06);
+  --workbench-shadow: 0 18px 42px -18px rgba(18, 38, 58, 0.16), 0 4px 12px -4px rgba(18, 38, 58, 0.06);
+  --skeleton-base: #DCE5EF;
+  --skeleton-highlight: rgba(255, 255, 255, 0.78);
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  --bg: #131618;
-  --surface: #1B2024;
-  --surface-subtle: #232A2F;
-  --border: #343D44;
-  --border-strong: #7C8B96;
-  --text: #F1F3F4;
-  --text-muted: #B0BBC4;
-  --accent: #5CCAB2;
-  --accent-hover: #78D6C2;
-  --accent-fg: #0B1A17;
-  --accent-subtle: #172B27;
-  --danger: #F28B82;
-  --danger-subtle: #2D1B1C;
+  --bg: #0E1722;
+  --surface: #162231;
+  --surface-subtle: #1E2E42;
+  --header-bg: rgba(22, 34, 49, 0.88);
+  --border: #2A3D54;
+  --border-strong: #6E87A3;
+  --text: #EEF3F8;
+  --text-muted: #A9BACD;
+  --primary: #88B2FC;
+  --primary-hover: #A4C4FD;
+  --primary-fg: #0B1420;
+  --primary-subtle: #172A45;
+  --accent: #73D2BE;
+  --accent-text: #73D2BE;
+  --accent-hover: #8EDEC9;
+  --accent-fg: #091B18;
+  --accent-subtle: #132C28;
+  --danger: #F79087;
+  --danger-subtle: #2D181B;
+  --inv-bg: #080E16;
+  --inv-surface: #111B28;
+  --inv-border: #23344A;
+  --inv-text: #EEF3F8;
+  --inv-text-muted: #A9BACD;
+  --inv-accent: #73D2BE;
+  --inv-primary: #88B2FC;
+  --nav-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.55), 0 2px 8px -2px rgba(0, 0, 0, 0.35);
+  --workbench-shadow: 0 22px 48px -18px rgba(0, 0, 0, 0.55), 0 6px 16px -6px rgba(0, 0, 0, 0.35);
+  --skeleton-base: #283B52;
+  --skeleton-highlight: rgba(169, 186, 205, 0.2);
   color-scheme: dark;
 }
 
@@ -53,7 +94,9 @@
     font-family: var(--font-sans);
     line-height: 1.6;
     scroll-behavior: smooth;
+    scroll-padding-top: 6.25rem;
     -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
   }
 
   body {
@@ -61,11 +104,19 @@
     min-height: 100vh;
     background-color: var(--bg);
     color: var(--text);
+    overflow-x: clip;
   }
 
-  a,
+  ::selection {
+    background-color: var(--primary-subtle);
+    color: var(--text);
+  }
+
+  a[href],
   button,
   summary,
+  select,
+  label[for],
   [role="tab"],
   [role="button"] {
     cursor: pointer;
@@ -78,9 +129,21 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: 6px;
+  }
+
+  .inv-band :focus-visible {
+    outline-color: var(--inv-primary);
+  }
+
+  details > summary {
+    list-style: none;
+  }
+
+  details > summary::-webkit-details-marker {
+    display: none;
   }
 }
 
@@ -93,10 +156,10 @@
   min-height: 44px;
   display: inline-flex;
   align-items: center;
-  background-color: var(--accent);
-  color: var(--accent-fg);
+  background-color: var(--primary);
+  color: var(--primary-fg);
   font-weight: 600;
-  border-radius: 4px;
+  border-radius: 8px;
   text-decoration: none;
 }
 
@@ -104,10 +167,116 @@
   left: 0.75rem;
 }
 
-html.theme-switching *,
-html.theme-switching *::before,
-html.theme-switching *::after {
-  transition: none !important;
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 2;
+}
+
+.theme-icon {
+  transition: transform 220ms var(--ease-out), opacity 180ms ease;
+}
+
+#theme-icon-sun {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+#theme-icon-moon {
+  opacity: 0;
+  transform: scale(0.65) rotate(45deg);
+}
+
+[data-theme="dark"] #theme-icon-sun {
+  opacity: 0;
+  transform: scale(0.65) rotate(-45deg);
+}
+
+[data-theme="dark"] #theme-icon-moon {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+html.theme-transition body,
+html.theme-transition header,
+html.theme-transition main,
+html.theme-transition footer,
+html.theme-transition section,
+html.theme-transition nav,
+html.theme-transition article,
+html.theme-transition aside,
+html.theme-transition div,
+html.theme-transition a,
+html.theme-transition button,
+html.theme-transition table,
+html.theme-transition thead,
+html.theme-transition tbody,
+html.theme-transition tr,
+html.theme-transition th,
+html.theme-transition td,
+html.theme-transition details,
+html.theme-transition summary,
+html.theme-transition code,
+html.theme-transition span {
+  transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease;
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--skeleton-base);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes studio-shimmer {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--skeleton-highlight) 50%,
+      transparent 100%
+    );
+    transform: translateX(-100%);
+    animation: studio-shimmer 1.45s linear infinite;
+  }
+
+  @keyframes studio-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .studio-reveal {
+    animation: studio-fade-up 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .studio-reveal-delay {
+    animation: studio-fade-up 320ms cubic-bezier(0.22, 1, 0.36, 1) 70ms both;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -118,5 +287,14 @@ html.theme-switching *::after {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .skeleton-shimmer::after {
+    display: none;
+  }
+
+  .theme-icon {
+    transform: none !important;
+    transition: opacity 150ms ease !important;
   }
 }

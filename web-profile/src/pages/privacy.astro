@@ -6,31 +6,37 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
   title="Privacy Notice | EL-Desk"
   description="Data handling, retention, and transport security details for the private EL-Desk remote desktop deployment."
 >
-  <article class="mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
-    <header class="border-b border-[var(--border)] pb-6">
-      <h1 class="text-3xl font-bold tracking-tight text-[var(--text)]">
-        EL-Desk privacy notice
+  <article class="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+    <header class="border-b border-[var(--border)] pb-8">
+      <div class="font-mono text-xs font-medium uppercase tracking-[0.1em] text-[var(--accent-text)]">
+        Privacy Notice
+      </div>
+      <h1 class="mt-2 text-[clamp(2rem,4vw,2.75rem)] font-bold leading-[1.08] tracking-[-0.025em] text-[var(--text)]">
+        EL-Desk <em class="font-serif font-normal italic text-[var(--accent-text)]">privacy notice</em>
       </h1>
-      <p class="mt-2 text-sm text-[var(--text-muted)]">
-        Scope: private remote desktop service at{" "}
-        <span class="font-mono text-[var(--text)]">desk.ekalliptus.com</span> (1 to 5 personal
-        accounts).
+      <p class="mt-3 text-sm text-[var(--text-muted)]">
+        Scope: private EL-Desk remote desktop deployment (1 to 5 personal accounts).
       </p>
     </header>
 
-    <div class="mt-8 space-y-8 text-sm leading-relaxed text-[var(--text)]">
-      <section class="space-y-2">
-        <h2 class="text-lg font-semibold text-[var(--text)]">1. Stored account and audit data</h2>
+    <div class="divide-y divide-[var(--border)] text-sm leading-relaxed text-[var(--text)]">
+      <section class="py-7 space-y-2.5">
+        <div class="font-mono text-xs font-medium text-[var(--accent-text)]">01 / ACCOUNT DATA</div>
+        <h2 class="text-lg font-semibold tracking-tight text-[var(--text)]">
+          Stored account and audit data
+        </h2>
         <p class="text-[var(--text-muted)]">
-          The custom API on{" "}
-          <span class="font-mono text-[var(--text)]">api.desk.ekalliptus.com</span> stores login
-          credentials (bcrypt password hashes), personal address books, device tags, and session
-          audit timestamps inside the owner's NeonDB PostgreSQL instance.
+          The private EL-Desk API (routed via Cloudflare Worker and VPS Caddy to the Go API) stores
+          login credentials (bcrypt password hashes), personal address books, device tags, and
+          session audit timestamps inside the owner's NeonDB PostgreSQL instance.
         </p>
       </section>
 
-      <section class="space-y-2">
-        <h2 class="text-lg font-semibold text-[var(--text)]">2. Transient presence heartbeats</h2>
+      <section class="py-7 space-y-2.5">
+        <div class="font-mono text-xs font-medium text-[var(--accent-text)]">02 / PRESENCE</div>
+        <h2 class="text-lg font-semibold tracking-tight text-[var(--text)]">
+          Transient presence heartbeats
+        </h2>
         <p class="text-[var(--text-muted)]">
           Device heartbeat checks keep peer online status in Go process memory with a 45-second
           expiration window. Heartbeat payloads are never written to PostgreSQL. The{" "}
@@ -39,21 +45,24 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
         </p>
       </section>
 
-      <section class="space-y-2">
-        <h2 class="text-lg font-semibold text-[var(--text)]">
-          3. Encryption and third-party servers
+      <section class="py-7 space-y-2.5">
+        <div class="font-mono text-xs font-medium text-[var(--accent-text)]">03 / TRANSPORT</div>
+        <h2 class="text-lg font-semibold tracking-tight text-[var(--text)]">
+          Encryption and third-party servers
         </h2>
         <p class="text-[var(--text-muted)]">
-          Client builds pin{" "}
-          <span class="font-mono text-[var(--text)]">relay.desk.ekalliptus.com</span> and require
-          public key verification (<span class="font-mono text-[var(--text)]">-k _</span>) before
-          establishing remote sessions. Builds do not transmit telemetry or update checks to public
-          RustDesk infrastructure.
+          Client builds pin the private relay server and require public key verification (
+          <span class="font-mono text-[var(--text)]">-k _</span>) before establishing remote
+          sessions. Builds do not transmit telemetry or update checks to public RustDesk
+          infrastructure.
         </p>
       </section>
 
-      <section class="space-y-2">
-        <h2 class="text-lg font-semibold text-[var(--text)]">4. Web portal requests</h2>
+      <section class="py-7 space-y-2.5">
+        <div class="font-mono text-xs font-medium text-[var(--accent-text)]">04 / PORTAL</div>
+        <h2 class="text-lg font-semibold tracking-tight text-[var(--text)]">
+          Web portal requests
+        </h2>
         <p class="text-[var(--text-muted)]">
           This web portal sets no analytics trackers or advertising cookies. Local storage is used
           strictly to remember your chosen light or dark theme preference in the browser.
@@ -61,12 +70,13 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
       </section>
     </div>
 
-    <div class="mt-10 border-t border-[var(--border)] pt-6">
+    <div class="border-t border-[var(--border)] pt-7">
       <a
         href="/#downloads"
-        class="inline-flex min-h-11 items-center rounded-[6px] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+        class="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--text)] transition-colors duration-150 hover:bg-[var(--surface-subtle)] no-underline"
       >
-        Return to client downloads
+        <span aria-hidden="true">&larr;</span>
+        <span>Return to client downloads</span>
       </a>
     </div>
   </article>

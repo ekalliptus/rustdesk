@@ -8,6 +8,7 @@ interface Props {
 
 const { title, description } = Astro.props;
 const currentPath = Astro.url.pathname;
+const isPrivacyPage = currentPath === "/privacy" || currentPath === "/privacy/";
 ---
 
 <!doctype html>
@@ -36,64 +37,123 @@ const currentPath = Astro.url.pathname;
   <body class="flex min-h-screen flex-col">
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
-    <header class="border-b border-[var(--border)] bg-[var(--surface)]">
-      <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+    <header class="pointer-events-none sticky top-3 z-40 px-4 sm:top-4 sm:px-6 lg:px-8">
+      <div
+        id="nav-capsule"
+        class="pointer-events-auto mx-auto flex max-w-5xl items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--header-bg)] px-3 py-1.5 backdrop-blur-md sm:px-4"
+        style="box-shadow: var(--nav-shadow);"
+      >
         <a
           href="/"
-          class="inline-flex min-h-11 items-center gap-2.5 text-base font-bold tracking-tight text-[var(--text)] no-underline"
+          class="inline-flex min-h-11 shrink-0 items-center gap-2.5 rounded-xl px-1.5 text-[15px] font-bold tracking-tight whitespace-nowrap text-[var(--text)] no-underline"
         >
-          <span
-            aria-hidden="true"
-            class="inline-flex h-7 w-7 items-center justify-center rounded-[4px] bg-[var(--accent)] font-mono text-xs font-bold text-[var(--accent-fg)]"
-          >
-            EL
-          </span>
+          <img
+            src="/favicon.svg"
+            width="28"
+            height="28"
+            alt=""
+            class="h-7 w-7 shrink-0 rounded-[7px]"
+          />
           <span>EL-Desk</span>
         </a>
 
-        <nav aria-label="Primary" class="hidden items-center gap-1 md:flex">
+        <nav
+          aria-label="Primary"
+          class="hidden items-center gap-0.5 rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] p-1 md:flex"
+        >
           <a
-            href="/#downloads"
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            href="/#overview"
+            data-nav-section="overview"
+            class="inline-flex min-h-11 items-center rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)] data-[active=true]:bg-[var(--surface)] data-[active=true]:text-[var(--text)] data-[active=true]:shadow-xs lg:px-3.5 no-underline"
           >
-            Downloads
+            Overview
+          </a>
+          <a
+            href="/#all-platforms"
+            data-nav-section="all-platforms"
+            class="inline-flex min-h-11 items-center rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)] data-[active=true]:bg-[var(--surface)] data-[active=true]:text-[var(--text)] data-[active=true]:shadow-xs lg:px-3.5 no-underline"
+          >
+            Packages
           </a>
           <a
             href="/#changelog"
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            data-nav-section="changelog"
+            class="inline-flex min-h-11 items-center rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)] data-[active=true]:bg-[var(--surface)] data-[active=true]:text-[var(--text)] data-[active=true]:shadow-xs lg:px-3.5 no-underline"
           >
             Changelog
           </a>
           <a
-            href="/#infrastructure"
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            href="/#architecture"
+            data-nav-section="architecture"
+            class="inline-flex min-h-11 items-center rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)] data-[active=true]:bg-[var(--surface)] data-[active=true]:text-[var(--text)] data-[active=true]:shadow-xs lg:px-3.5 no-underline"
           >
-            Infrastructure
+            Architecture
           </a>
           <a
             href="/privacy"
-            aria-current={currentPath === "/privacy" ? "page" : undefined}
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            data-nav-section="privacy"
+            data-active={isPrivacyPage ? "true" : undefined}
+            aria-current={isPrivacyPage ? "page" : undefined}
+            class="inline-flex min-h-11 items-center rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-[var(--text-muted)] transition-colors duration-150 hover:text-[var(--text)] data-[active=true]:bg-[var(--surface)] data-[active=true]:text-[var(--text)] data-[active=true]:shadow-xs lg:px-3.5 no-underline"
           >
             Privacy
           </a>
         </nav>
 
-        <div class="flex items-center gap-2">
+        <div class="flex shrink-0 items-center gap-2">
           <button
             id="theme-toggle"
             type="button"
-            class="inline-flex min-h-11 items-center justify-center rounded-[6px] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] active:bg-[var(--border)]"
+            class="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 text-xs font-semibold text-[var(--text)] transition-[background-color,border-color,transform] duration-150 hover:bg-[var(--surface-subtle)] active:scale-[0.97] active:bg-[var(--border)]"
             aria-pressed="false"
             aria-label="Toggle color theme"
           >
-            <span id="theme-toggle-label">Theme: Light</span>
+            <span class="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+              <svg
+                id="theme-icon-sun"
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                class="theme-icon absolute inset-0 h-3.5 w-3.5"
+              >
+                <circle cx="8" cy="8" r="3" />
+                <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" />
+              </svg>
+              <svg
+                id="theme-icon-moon"
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="theme-icon absolute inset-0 h-3.5 w-3.5"
+              >
+                <path d="M13.2 9.8A5.5 5.5 0 0 1 6.2 2.8a5.5 5.5 0 1 0 7 7Z" />
+              </svg>
+            </span>
+            <span id="theme-toggle-label">Light</span>
           </button>
+
+          <a
+            href="/#downloads"
+            class="hidden min-h-11 items-center justify-center rounded-full bg-[var(--primary)] px-4 text-xs font-semibold whitespace-nowrap text-[var(--primary-fg)] transition-colors duration-150 hover:bg-[var(--primary-hover)] active:opacity-90 lg:inline-flex no-underline"
+          >
+            Get EL-Desk
+          </a>
 
           <button
             id="menu-toggle"
             type="button"
-            class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-[6px] border border-[var(--border-strong)] bg-[var(--surface)] px-3 text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-subtle)] md:hidden"
+            class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3.5 text-xs font-semibold text-[var(--text)] transition-colors duration-150 hover:bg-[var(--surface-subtle)] md:hidden"
             aria-expanded="false"
             aria-controls="mobile-nav"
             aria-label="Toggle navigation menu"
@@ -107,33 +167,49 @@ const currentPath = Astro.url.pathname;
         id="mobile-nav"
         aria-label="Mobile navigation"
         hidden
-        class="border-t border-[var(--border)] bg-[var(--surface)] px-4 py-3 md:hidden"
+        class="pointer-events-auto mx-auto mt-2 max-w-5xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 md:hidden"
+        style="box-shadow: var(--nav-shadow);"
       >
         <div class="flex flex-col gap-1">
           <a
-            href="/#downloads"
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            href="/#overview"
+            class="inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
           >
-            Downloads
+            Overview
+          </a>
+          <a
+            href="/#all-platforms"
+            class="inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+          >
+            Packages
           </a>
           <a
             href="/#changelog"
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            class="inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
           >
             Changelog
           </a>
           <a
-            href="/#infrastructure"
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            href="/#architecture"
+            class="inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
           >
-            Infrastructure
+            Architecture
           </a>
           <a
             href="/privacy"
-            aria-current={currentPath === "/privacy" ? "page" : undefined}
-            class="inline-flex min-h-11 items-center rounded-[4px] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-subtle)] no-underline"
+            aria-current={isPrivacyPage ? "page" : undefined}
+            class:list={[
+              "inline-flex min-h-11 items-center rounded-xl px-3.5 text-sm font-medium text-[var(--text)] no-underline",
+              isPrivacyPage ? "bg-[var(--surface-subtle)]" : "hover:bg-[var(--surface-subtle)]",
+            ]}
           >
             Privacy
+          </a>
+          <a
+            href="/#downloads"
+            class="mt-1 inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--primary)] px-4 text-sm font-semibold text-[var(--primary-fg)] hover:bg-[var(--primary-hover)] no-underline"
+          >
+            Get EL-Desk
           </a>
         </div>
       </nav>
@@ -145,39 +221,49 @@ const currentPath = Astro.url.pathname;
 
     <footer class="border-t border-[var(--border)] bg-[var(--surface)]">
       <div class="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 text-xs text-[var(--text-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-        <div>
-          EL-Desk private deployment on <span class="font-mono text-[var(--text)]">desk.ekalliptus.com</span>, built from upstream{" "}
-          <a
-            href="https://github.com/rustdesk/rustdesk"
-            rel="noopener noreferrer"
-            class="text-[var(--accent)] underline underline-offset-4 hover:text-[var(--accent-hover)]"
-          >
-            RustDesk
-          </a>
-          .
+        <div class="flex items-center gap-2.5">
+          <img
+            src="/favicon.svg"
+            width="22"
+            height="22"
+            alt=""
+            class="h-[22px] w-[22px] shrink-0 rounded-[6px]"
+          />
+          <span>EL-Desk private deployment, built from upstream RustDesk.</span>
         </div>
 
-        <div class="flex flex-wrap items-center gap-4">
+        <nav aria-label="Footer navigation" class="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <a
+            href="/#overview"
+            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--primary)]"
+          >
+            Overview
+          </a>
           <a
             href="/#downloads"
-            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--accent)]"
+            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--primary)]"
           >
             Downloads
           </a>
           <a
+            href="/#changelog"
+            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--primary)]"
+          >
+            Changelog
+          </a>
+          <a
+            href="/#architecture"
+            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--primary)]"
+          >
+            Architecture
+          </a>
+          <a
             href="/privacy"
-            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--accent)]"
+            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--primary)]"
           >
             Privacy
           </a>
-          <a
-            href="https://dl.desk.ekalliptus.com/latest.json"
-            rel="noopener noreferrer"
-            class="inline-flex min-h-11 items-center text-[var(--text)] underline underline-offset-4 hover:text-[var(--accent)]"
-          >
-            latest.json
-          </a>
-        </div>
+        </nav>
       </div>
     </footer>
 
@@ -188,6 +274,8 @@ const currentPath = Astro.url.pathname;
         var themeLabel = document.getElementById("theme-toggle-label");
         var menuBtn = document.getElementById("menu-toggle");
         var mobileNav = document.getElementById("mobile-nav");
+        var activeThemeTransition = null;
+        var themeFallbackTimer = null;
 
         function syncThemeButton() {
           var isDark = root.dataset.theme === "dark";
@@ -195,8 +283,18 @@ const currentPath = Astro.url.pathname;
             themeBtn.setAttribute("aria-pressed", isDark ? "true" : "false");
           }
           if (themeLabel) {
-            themeLabel.textContent = isDark ? "Theme: Dark" : "Theme: Light";
+            themeLabel.textContent = isDark ? "Dark" : "Light";
           }
+        }
+
+        function applyTheme(next) {
+          root.dataset.theme = next;
+          try {
+            localStorage.setItem("eldesk-theme", next);
+          } catch (_err) {
+            // Ignore storage quota or private browsing errors.
+          }
+          syncThemeButton();
         }
 
         syncThemeButton();
@@ -204,18 +302,90 @@ const currentPath = Astro.url.pathname;
         if (themeBtn) {
           themeBtn.addEventListener("click", function () {
             var next = root.dataset.theme === "dark" ? "light" : "dark";
-            root.classList.add("theme-switching");
-            root.dataset.theme = next;
-            void root.offsetHeight;
-            try {
-              localStorage.setItem("eldesk-theme", next);
-            } catch (_err) {
-              // Ignore storage quota or private browsing errors.
+            var prefersReducedMotion =
+              window.matchMedia &&
+              window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+            if (typeof document.startViewTransition === "function") {
+              if (activeThemeTransition) {
+                try {
+                  activeThemeTransition.skipTransition();
+                } catch (_err) {
+                  // Ignore if transition already finished.
+                }
+                activeThemeTransition = null;
+                applyTheme(next);
+                return;
+              }
+
+              var rect = themeBtn.getBoundingClientRect();
+              var x = rect.left + rect.width / 2;
+              var y = rect.top + rect.height / 2;
+              var endRadius = Math.hypot(
+                Math.max(x, window.innerWidth - x),
+                Math.max(y, window.innerHeight - y),
+              );
+
+              var transition = document.startViewTransition(function () {
+                applyTheme(next);
+              });
+              activeThemeTransition = transition;
+
+              transition.ready
+                .then(function () {
+                  if (activeThemeTransition !== transition) return;
+                  if (prefersReducedMotion) {
+                    document.documentElement.animate(
+                      { opacity: [0, 1] },
+                      {
+                        duration: 150,
+                        easing: "ease",
+                        pseudoElement: "::view-transition-new(root)",
+                      },
+                    );
+                    return;
+                  }
+                  document.documentElement.animate(
+                    {
+                      clipPath: [
+                        "circle(0px at " + x + "px " + y + "px)",
+                        "circle(" + endRadius + "px at " + x + "px " + y + "px)",
+                      ],
+                    },
+                    {
+                      duration: 380,
+                      easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+                      pseudoElement: "::view-transition-new(root)",
+                    },
+                  );
+                })
+                .catch(function () {
+                  // Theme already applied if view transition setup is skipped.
+                });
+
+              transition.finished.finally(function () {
+                if (activeThemeTransition === transition) {
+                  activeThemeTransition = null;
+                }
+              });
+              return;
             }
-            syncThemeButton();
-            requestAnimationFrame(function () {
-              root.classList.remove("theme-switching");
-            });
+
+            if (!prefersReducedMotion) {
+              if (themeFallbackTimer !== null) {
+                window.clearTimeout(themeFallbackTimer);
+              }
+              root.classList.add("theme-transition");
+              void root.offsetHeight;
+              applyTheme(next);
+              themeFallbackTimer = window.setTimeout(function () {
+                root.classList.remove("theme-transition");
+                themeFallbackTimer = null;
+              }, 240);
+              return;
+            }
+
+            applyTheme(next);
           });
         }
 
@@ -245,6 +415,64 @@ const currentPath = Astro.url.pathname;
             }
           });
         }
+
+        var navLinks = Array.prototype.slice.call(
+          document.querySelectorAll('a[data-nav-section]'),
+        );
+        function setActiveSection(id) {
+          navLinks.forEach(function (link) {
+            if (link.dataset.navSection === id) {
+              link.setAttribute("data-active", "true");
+            } else if (link.dataset.navSection !== "privacy" || window.location.pathname.indexOf("/privacy") !== 0) {
+              link.removeAttribute("data-active");
+            }
+          });
+        }
+
+        var sectionIds = ["overview", "all-platforms", "changelog", "architecture"];
+        var sections = sectionIds
+          .map(function (id) {
+            return document.getElementById(id);
+          })
+          .filter(Boolean);
+
+        if (sections.length > 0 && "IntersectionObserver" in window) {
+          var observer = new IntersectionObserver(
+            function (entries) {
+              if (window.scrollY < 160) {
+                setActiveSection("");
+                return;
+              }
+              for (var i = 0; i < entries.length; i++) {
+                if (entries[i].isIntersecting) {
+                  setActiveSection(entries[i].target.id);
+                  break;
+                }
+              }
+            },
+            { rootMargin: "-25% 0px -60% 0px" },
+          );
+          sections.forEach(function (sec) {
+            observer.observe(sec);
+          });
+          window.addEventListener(
+            "scroll",
+            function () {
+              if (window.scrollY < 160) {
+                setActiveSection("");
+              }
+            },
+            { passive: true },
+          );
+        }
+
+        navLinks.forEach(function (link) {
+          link.addEventListener("click", function () {
+            if (link.dataset.navSection) {
+              setActiveSection(link.dataset.navSection);
+            }
+          });
+        });
       })();
     </script>
   </body>
